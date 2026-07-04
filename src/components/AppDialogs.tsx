@@ -1111,6 +1111,12 @@ function storybookCharacterComfyStatus({
       text: 'This function is not used yet because the selected ComfyUI provider has not been checked.',
     };
   }
+  if (healthValues.some((health) => health?.status === 'warning')) {
+    return {
+      active: false,
+      text: 'This function is not used yet because the selected ComfyUI provider setup is incomplete.',
+    };
+  }
   return {
     active: false,
     text: 'This function is not used because ComfyUI is offline.',

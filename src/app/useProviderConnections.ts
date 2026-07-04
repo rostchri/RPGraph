@@ -26,6 +26,7 @@ import {
 } from '../llm/providerKind';
 import {
   characterComfyLoraSlots,
+  comfySetupRequiredMessage,
   defaultComfyBaseUrl,
   defaultComfyCheckpointName,
   defaultComfyDiffusionModelName,
@@ -38,6 +39,7 @@ import {
   defaultComfyWorkflowPath,
   defaultConnection,
   defaultConnectionSampling,
+  missingComfySetupFields,
   runtimeComfyLoraSlots,
   validComfyDimension,
   validComfyLoraSlots,
@@ -61,6 +63,24 @@ type AvailableComfyModels = {
   text_encoders: string[];
   diffusion_models: string[];
 };
+
+function comfySetupHealth(connection: ConnectionPreset, detail: string): ProviderConnectionHealth {
+  const missingFields = missingComfySetupFields(connection);
+  if (missingFields.length === 0) {
+    return {
+      status: 'online',
+      detail,
+      capabilities: { image: true },
+      checkedAt: providerCheckedAt(),
+    };
+  }
+  return {
+    status: 'warning',
+    detail: comfySetupRequiredMessage(missingFields),
+    capabilities: { image: true },
+    checkedAt: providerCheckedAt(),
+  };
+}
 
 type UseProviderConnectionsOptions = {
   connections: ConnectionPreset[];
@@ -466,14 +486,12 @@ export function useProviderConnections({
           return health;
         }
         const devices = Array.isArray(result.devices) ? result.devices.length : 0;
-        health = {
-          status: 'online',
-          detail: devices > 0
+        health = comfySetupHealth(
+          connection,
+          devices > 0
             ? `Connected to ComfyUI. ${devices} device${devices === 1 ? '' : 's'} reported.`
             : 'Connected to ComfyUI.',
-          capabilities: { image: true },
-          checkedAt: providerCheckedAt(),
-        };
+        );
       } else if (
         connectionRequiresApiKeyForModelList(connection) &&
         connection.apiKey.trim().length === 0
@@ -1012,11 +1030,10 @@ export function useProviderConnections({
           return;
         }
       }
-      updateProviderHealth(connection.id, {
-        status: 'online',
-        detail: `Loaded ${total} ComfyUI model entr${total === 1 ? 'y' : 'ies'}.`,
-        checkedAt: providerCheckedAt(),
-      });
+      updateProviderHealth(
+        connection.id,
+        comfySetupHealth(connection, `Loaded ${total} ComfyUI model entr${total === 1 ? 'y' : 'ies'}.`),
+      );
       if (options.showStatus !== false) {
         setConnectionStatus(`Loaded ${total} ComfyUI model entr${total === 1 ? 'y' : 'ies'}.`);
       }
@@ -1195,6 +1212,14 @@ export function useProviderConnections({
       setConnectionStatus('Choose a ComfyUI provider before generating an image.');
       return;
     }
+    const missingFields = missingComfySetupFields(connection);
+    if (missingFields.length > 0) {
+      const message = comfySetupRequiredMessage(missingFields);
+      updateProviderHealth(connection.id, comfySetupHealth(connection, message));
+      setConnectionStatus(message);
+      notifySystem('warning', message);
+      return;
+    }
     const workflowPath = connection.comfyWorkflowPath || defaultComfyWorkflowPath;
     const inspection = comfyWorkflowInspection?.workflowPath === workflowPath
       ? comfyWorkflowInspection
@@ -1299,6 +1324,12 @@ export function useProviderConnections({
     const connection = connections.find((entry) => entry.id === request.providerId && entry.kind === 'comfyui');
     if (!connection) {
       throw new Error('Choose a ComfyUI provider first.');
+    }
+    const missingFields = missingComfySetupFields(connection);
+    if (missingFields.length > 0) {
+      const message = comfySetupRequiredMessage(missingFields);
+      updateProviderHealth(connection.id, comfySetupHealth(connection, message));
+      throw new Error(message);
     }
     const appearance = request.appearance.trim();
     const scenarioPrompt = request.scenarioPrompt.trim();
@@ -1567,6 +1598,19 @@ export function useProviderConnections({
         ...(providerHealthByIdRef.current[nextConnection.id] ?? { status: 'unknown' as const }),
         capabilities: openRouterCapabilitiesForConnection(nextConnection, modelDetails),
       });
+    } else if (
+      nextConnection.kind === 'comfyui' &&
+      (
+        field === 'comfyCheckpointName' ||
+        field === 'comfyDiffusionModelName' ||
+        field === 'comfyVaeName' ||
+        field === 'comfyTextEncoderName'
+      )
+    ) {
+      const currentHealth = providerHealthByIdRef.current[nextConnection.id] ?? { status: 'unknown' as const };
+      if (currentHealth.status === 'online' || currentHealth.status === 'warning') {
+        updateProviderHealth(nextConnection.id, comfySetupHealth(nextConnection, 'ComfyUI setup is complete.'));
+      }
     }
     setEditingConnection(nextConnection);
     setConnections((current) =>

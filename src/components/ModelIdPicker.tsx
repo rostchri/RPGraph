@@ -48,6 +48,7 @@ export function ModelIdPicker({
   options,
   onChange,
   onOpenOptions,
+  onBlur,
   placeholder = 'Type a model ID or load models',
   favoritesStorageKey = defaultFavoriteModelsStorageKey,
   disabled = false,
@@ -57,6 +58,7 @@ export function ModelIdPicker({
   options: string[];
   onChange: (value: string) => void;
   onOpenOptions: () => void;
+  onBlur?: () => void;
   placeholder?: string;
   favoritesStorageKey?: string;
   disabled?: boolean;
@@ -248,6 +250,7 @@ export function ModelIdPicker({
             openOptions();
           }}
           onFocus={openOptions}
+          onBlur={onBlur}
           onKeyDown={handleInputKeyDown}
           placeholder={placeholder}
           role="combobox"

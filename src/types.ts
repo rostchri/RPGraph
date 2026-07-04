@@ -60,7 +60,7 @@ export type ProviderConnectionCapabilities = {
 };
 
 export type ProviderConnectionHealth = {
-  status: 'unknown' | 'checking' | 'online' | 'offline';
+  status: 'unknown' | 'checking' | 'online' | 'warning' | 'offline';
   detail?: string;
   capabilities?: ProviderConnectionCapabilities;
   checkedAt?: number;

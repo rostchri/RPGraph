@@ -20,7 +20,9 @@ import {
   defaultComfyVaeName,
   defaultComfyWidth,
   defaultComfyWorkflowPath,
+  comfySetupRequiredMessage,
   characterComfyLoraSlots,
+  missingComfySetupFields,
 } from '../settings';
 import {
   isLmStudioConnection,
@@ -364,6 +366,13 @@ export async function executeGraph({
     const comfyHealth = providerHealthById[comfyConnection.id];
     if (comfyHealth?.status === 'offline') {
       throw new Error(`Create image action skipped because ${comfyConnection.label} is offline${comfyHealth.detail ? `: ${comfyHealth.detail}` : '.'}`);
+    }
+    if (comfyHealth?.status === 'warning') {
+      throw new Error(`Create image action skipped because ${comfyConnection.label} is not fully set up${comfyHealth.detail ? `: ${comfyHealth.detail}` : '.'}`);
+    }
+    const missingComfyFields = missingComfySetupFields(comfyConnection);
+    if (missingComfyFields.length > 0) {
+      throw new Error(comfySetupRequiredMessage(missingComfyFields));
     }
 
     const manageModelMemory = request.manageModelMemory ?? true;

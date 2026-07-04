@@ -52,7 +52,9 @@ import {
   defaultComfyWidth,
   defaultComfyWorkflowPath,
   defaultConnectionSampling,
+  comfySetupRequiredMessage,
   maxSmoothChatAutoScrollMinSpeed,
+  missingComfySetupFields,
   minSmoothChatAutoScrollMinSpeed,
   comfyCharacterLoraName,
   validSmoothChatAutoScrollMinSpeed,
@@ -883,6 +885,9 @@ export function StudioDialogs({
     isComfyConnection && comfyWorkflowModelSource === 'checkpoint';
   const comfyWorkflowCanGenerate =
     !isComfyConnection || !comfyWorkflowInspection || comfyWorkflowInspection.ok;
+  const missingComfySetup = isComfyConnection ? missingComfySetupFields(editingConnection) : [];
+  const comfySetupMessage = comfySetupRequiredMessage(missingComfySetup);
+  const comfySetupComplete = missingComfySetup.length === 0;
   const comfyWorkflowIncompatible =
     isComfyConnection && !!comfyWorkflowInspection && !comfyWorkflowInspection.ok;
   const comfyWorkflowChecklistInspection =
@@ -898,6 +903,8 @@ export function StudioDialogs({
     switch (health?.status) {
       case 'online':
         return 'Connected';
+      case 'warning':
+        return 'Setup needed';
       case 'offline':
         return 'Offline';
       case 'checking':
@@ -2798,6 +2805,18 @@ export function StudioDialogs({
                                         );
                                         onEditConnection('comfyLoraSlots', nextSlots);
                                       }}
+                                      onBlur={() => {
+                                        if (slot.name.trim().length > 0) {
+                                          return;
+                                        }
+                                        const fallbackName = defaultComfyLoraSlots[index]?.name ?? 'None';
+                                        const nextSlots = comfyLoraSlots.map((currentSlot, slotIndex) =>
+                                          slotIndex === index
+                                            ? { ...currentSlot, name: fallbackName }
+                                            : currentSlot,
+                                        );
+                                        onEditConnection('comfyLoraSlots', nextSlots);
+                                      }}
                                       options={comfyModelOptions(slot.name, availableComfyModels.loras, ['None', comfyCharacterLoraName])}
                                       onOpenOptions={() => undefined}
                                       placeholder="Type or select a LoRA"
@@ -2838,13 +2857,17 @@ export function StudioDialogs({
                                   kinds={['image']}
                                 />
                               </strong>
-                              <span>{editingConnectionHealth.detail ?? 'Model lists load automatically. Generate an image or unload model memory.'}</span>
+                              <span>
+                                {comfySetupMessage ||
+                                  editingConnectionHealth.detail ||
+                                  'Model lists load automatically. Generate an image or unload model memory.'}
+                              </span>
                             </div>
                             <div className="connection-provider-actions">
                               <button
                                 type="button"
                                 onClick={onGenerateComfyTestImage}
-                                disabled={comfyProviderActionActive !== null || !comfyWorkflowCanGenerate}
+                                disabled={comfyProviderActionActive !== null || !comfyWorkflowCanGenerate || !comfySetupComplete}
                               >
                                 {comfyProviderActionActive === 'generate' ? 'Generating ...' : 'Generate Image'}
                               </button>

@@ -14662,6 +14662,12 @@ button.message-timeline-row.phone:focus-visible {
   background: rgba(245, 185, 107, 0.1);
 }
 
+.provider-health.warning {
+  border-color: rgba(245, 185, 107, 0.42);
+  color: #f5b96b;
+  background: rgba(245, 185, 107, 0.12);
+}
+
 .preset-tabs button.active {
   color: #f0eaff;
   border-color: rgba(138, 115, 201, 0.62);
@@ -15895,6 +15901,11 @@ button.message-timeline-row.phone:focus-visible {
 }
 
 .node-custom-select-status.checking {
+  background: #f5c05d;
+  box-shadow: 0 0 0 2px rgba(245, 192, 93, 0.16), 0 0 10px rgba(245, 192, 93, 0.4);
+}
+
+.node-custom-select-status.warning {
   background: #f5c05d;
   box-shadow: 0 0 0 2px rgba(245, 192, 93, 0.16), 0 0 10px rgba(245, 192, 93, 0.4);
 }

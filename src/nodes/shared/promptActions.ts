@@ -770,6 +770,9 @@ function createImageProviderStatus(
   if (healthValues.some((health) => health?.status === 'checking')) {
     return { available: false, tone: 'warning', label: 'Checking provider' };
   }
+  if (healthValues.some((health) => health?.status === 'warning')) {
+    return { available: false, tone: 'warning', label: 'ComfyUI setup needed' };
+  }
   if (healthValues.some((health) => health?.status === 'offline')) {
     return { available: false, tone: 'error', label: 'ComfyUI offline' };
   }

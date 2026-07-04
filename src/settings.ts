@@ -168,9 +168,9 @@ export const defaultComfyTextEncoderName = '';
 export const comfyCharacterLoraName = 'Character LoRA';
 export const defaultComfyLoraSlots: ComfyLoraSlot[] = [
   { name: comfyCharacterLoraName, strength: 1 },
-  { name: '', strength: 1 },
-  { name: '', strength: 1 },
-  { name: '', strength: 1 },
+  { name: 'None', strength: 1 },
+  { name: 'None', strength: 1 },
+  { name: 'None', strength: 1 },
 ];
 const obsoleteDefaultComfyPrompt = 'woman taking a stylish mirror selfie, cinematic light, detailed skin, modern apartment';
 const obsoleteDefaultComfyDiffusionModelName = 'krea2_turbo_fp8.safetensors';
@@ -192,6 +192,32 @@ export const connectionReasoningEfforts = [
   'xhigh',
   'max',
 ] as const satisfies readonly ConnectionReasoningEffort[];
+
+export function missingComfySetupFields(connection: Pick<
+  ConnectionPreset,
+  'comfyCheckpointName' | 'comfyDiffusionModelName' | 'comfyVaeName' | 'comfyTextEncoderName'
+>) {
+  const missing: string[] = [];
+  if (
+    !connection.comfyCheckpointName?.trim() &&
+    !connection.comfyDiffusionModelName?.trim()
+  ) {
+    missing.push('Checkpoint or diffusion model');
+  }
+  if (!connection.comfyVaeName?.trim()) {
+    missing.push('VAE');
+  }
+  if (!connection.comfyTextEncoderName?.trim()) {
+    missing.push('Text Encoder');
+  }
+  return missing;
+}
+
+export function comfySetupRequiredMessage(missingFields: string[]) {
+  return missingFields.length > 0
+    ? `Choose ${missingFields.join(', ')} before generating an image.`
+    : '';
+}
 
 export const defaultConnectionSampling = {
   temperature: 0.8,
@@ -244,6 +270,11 @@ function validComfyModelName(value: unknown, fallback: string) {
   return typeof value === 'string' ? value : fallback;
 }
 
+function validComfyLoraName(value: unknown, fallback: string) {
+  const name = validComfyModelName(value, fallback).trim();
+  return name.length > 0 ? name : fallback;
+}
+
 function validCurrentComfyModelName(value: unknown, fallback: string, obsoleteDefault: string) {
   const name = validComfyModelName(value, fallback);
   return name === obsoleteDefault ? fallback : name;
@@ -256,7 +287,7 @@ export function validComfyLoraSlots(value: unknown): ComfyLoraSlot[] {
     if (!slot || typeof slot !== 'object' || Array.isArray(slot)) {
       return { ...fallback };
     }
-    const slotName = validComfyModelName((slot as Partial<ComfyLoraSlot>).name, fallback.name);
+    const slotName = validComfyLoraName((slot as Partial<ComfyLoraSlot>).name, fallback.name);
     return {
       name: slotName === obsoleteDefaultComfyLoraNames[index] ? fallback.name : slotName,
       strength: validComfyStrength((slot as Partial<ComfyLoraSlot>).strength, fallback.strength),

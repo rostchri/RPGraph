@@ -7,7 +7,7 @@ type Option<TValue extends SelectValue> = {
   value: TValue;
   label: string;
   disabled?: boolean;
-  status?: 'unknown' | 'checking' | 'online' | 'offline';
+  status?: 'unknown' | 'checking' | 'online' | 'warning' | 'offline';
 };
 
 type NodeCustomSelectProps<TValue extends SelectValue> = {

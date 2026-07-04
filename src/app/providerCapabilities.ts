@@ -143,6 +143,9 @@ export function providerCheckConnectionStatus(
   if (health.status === 'checking') {
     return `${name}: Checking ...`;
   }
+  if (health.status === 'warning') {
+    return `${name}: ${health.detail ?? 'Setup incomplete.'}`;
+  }
   if (health.status === 'offline') {
     return `${name}: ${health.detail ?? 'Offline.'}`;
   }
