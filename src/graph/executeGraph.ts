@@ -6,6 +6,7 @@ import { appointmentsFromEventEntities } from '../data-management/eventStore';
 import type { EventEntity } from '../data-management/types';
 import { runtimePortValueKey } from '../nodes/shared/portRuntime';
 import { wireLinkName } from '../nodes/memory-slot/model';
+import { customNodeDefinition } from '../nodes/custom-node/model';
 import { syncStorybookImageContextRules } from '../nodes/dynamic-context-injection/storybookImageRules';
 import {
   parseRpStorybookJson,
@@ -705,7 +706,14 @@ export async function executeGraph({
       nodes
         .filter(
           (node) =>
-            (node.data.nodeType === 'text-preview' || node.data.nodeType === 'memory-slot') &&
+            (
+              node.data.nodeType === 'text-preview' ||
+              node.data.nodeType === 'memory-slot' ||
+              (
+                node.data.nodeType === 'custom' &&
+                customNodeDefinition(node.data.customNodeDefinition).outputs.length === 0
+              )
+            ) &&
             edges.some((edge) => edge.target === node.id),
         )
         .map((node) => executeNode(node.id)),

@@ -31,6 +31,7 @@ import {
   type RpStorybookV1,
 } from '../nodes/rp-storybook-v1/model';
 import { NodeCustomSelect } from '../nodes/shared/NodeCustomSelect';
+import { runStateClassName } from '../nodes/shared/CardView';
 import { providerOption } from '../nodes/shared/providerHealthLabels';
 import {
   configForPromptActionToken,
@@ -79,6 +80,14 @@ export type StorybookCreatorMessage = {
 export type CustomNodeAssistantMessage = {
   role: 'user' | 'assistant' | 'error';
   text: string;
+};
+
+export type CustomNodeAssistantDiagnostic = {
+  id: string;
+  source: string;
+  message: string;
+  createdAt: number;
+  expanded: boolean;
 };
 
 const characterLoraFavoritesStorageKey = 'rpgraph.favoriteCharacterLoraModels';
@@ -331,7 +340,7 @@ const customNodePromptSuggestions = [
       'Build a Custom Node for roleplay scene analysis.',
       'It should take one text input named scene_text and use llmJson to extract structured JSON in this shape: {"mood":"string","tension":0,"location":"string","tone":"string","tags":["string"]}.',
       'Create outputs mood as text, tension as number, location as text, tone as text, and tags as json.',
-      'Add a Run button and a display that shows the full formatted JSON result.',
+      'Add a display that shows the full formatted JSON result.',
     ].join('\n'),
   },
   {
@@ -340,7 +349,7 @@ const customNodePromptSuggestions = [
       'Build a Custom Node that reads a character message and identifies hidden roleplay intent.',
       'Use one text input named character_message and call llmJson to return {"wants":"string","fears":"string","hides":"string","goal":"string","confidence":0}.',
       'Create text outputs wants, fears, hides, and goal, plus a number output confidence.',
-      'Add a display that shows the JSON and a Run button to execute the analysis manually.',
+      'Add a display that shows the JSON.',
     ].join('\n'),
   },
   {
@@ -349,7 +358,7 @@ const customNodePromptSuggestions = [
       'Build a Custom Node that cleans mixed roleplay text into structured parts.',
       'Use one text input named raw_text. Use llmJson to return {"dialogue":"string","actions":"string","narration":"string","notes":"string"}.',
       'Create four text outputs dialogue, actions, narration, and notes.',
-      'Add a Run button and a display that previews the separated result as formatted JSON.',
+      'Add a display that previews the separated result as formatted JSON.',
     ].join('\n'),
   },
   {
@@ -358,7 +367,7 @@ const customNodePromptSuggestions = [
       'Build a Custom Node that checks new scene text against existing roleplay memory.',
       'Use two text inputs: memory_context and new_scene_text. Ask the LLM with llmJson to return {"has_conflict":false,"conflicts":["string"],"safe_summary":"string"}.',
       'Create a boolean output has_conflict, a json output conflicts, and a text output safe_summary.',
-      'Add a Run button and a display with the continuity report.',
+      'Add a display with the continuity report.',
     ].join('\n'),
   },
   {
@@ -368,7 +377,7 @@ const customNodePromptSuggestions = [
       'Use text inputs character_action and npc_profile, plus a number input relationship_score.',
       'Use llmJson to return {"reaction":"string","emotion":"string","relationship_delta":0,"next_hook":"string"}.',
       'Create text outputs reaction, emotion, and next_hook, plus a number output relationship_delta.',
-      'Add a Run button and a display that shows the generated npc state JSON.',
+      'Add a display that shows the generated npc state JSON.',
     ].join('\n'),
   },
   {
@@ -378,7 +387,7 @@ const customNodePromptSuggestions = [
       'Use one text input named scene_exchange and call llmJson to return {"trust":0,"fear":0,"attraction":0,"anger":0,"respect":0,"reason":"string"} where each stat is from -10 to 10.',
       'Clamp all numeric values between -10 and 10 in code before outputting them.',
       'Create number outputs trust, fear, attraction, anger, and respect, plus a text output reason.',
-      'Add a display with the full JSON result and a Run button.',
+      'Add a display with the full JSON result.',
     ].join('\n'),
   },
   {
@@ -387,7 +396,7 @@ const customNodePromptSuggestions = [
       'Build a Custom Node that scans a scene for quest-relevant information.',
       'Use one text input named scene_text and llmJson to return {"clues":["string"],"unresolved_questions":["string"],"named_objects":["string"],"next_objectives":["string"]}.',
       'Create json outputs clues, unresolved_questions, named_objects, and next_objectives.',
-      'Add a display that formats the clues as readable bullet-style JSON and a Run button.',
+      'Add a display that formats the clues as readable bullet-style JSON.',
     ].join('\n'),
   },
   {
@@ -397,7 +406,7 @@ const customNodePromptSuggestions = [
       'Use one text input named source_text and a select control named tone with options darker, softer, romantic, threatening, and comedic.',
       'Use llm to rewrite the text in the selected tone, but keep character facts and scene continuity intact.',
       'Create one text output rewritten_text and a display that shows the selected tone and rewritten result.',
-      'Add a Run button.',
+      'Run automatically when the workflow reaches this node.',
     ].join('\n'),
   },
   {
@@ -407,7 +416,7 @@ const customNodePromptSuggestions = [
       'Use one text input named long_history and a slider control named max_bullets from 3 to 12.',
       'Use llmJson to return {"memory_bullets":["string"],"names":["string"],"promises":["string"],"unresolved_threads":["string"]}.',
       'Create json outputs memory_bullets, names, promises, and unresolved_threads.',
-      'Add a display with the formatted compressed memory and a Run button.',
+      'Add a display with the formatted compressed memory.',
     ].join('\n'),
   },
   {
@@ -417,7 +426,7 @@ const customNodePromptSuggestions = [
       'Use a json input current_stats and a text input latest_scene_text.',
       'Use llmJson to return {"stats":{},"changes":[{"stat":"string","delta":0,"reason":"string"}],"summary":"string"}.',
       'The code should keep the previous stats if the LLM omits a field, apply numeric deltas safely, and output updated_stats as json, changes as json, and summary as text.',
-      'Add a display that shows the stat changes and a Run button.',
+      'Add a display that shows the stat changes.',
     ].join('\n'),
   },
 ];
@@ -427,10 +436,14 @@ type CustomNodeAssistantDialogProps = {
   connections: ConnectionPreset[];
   defaultConnectionId: string;
   messages: CustomNodeAssistantMessage[];
+  diagnostics: CustomNodeAssistantDiagnostic[];
   onSubmit: (message: string, connectionId: string) => Promise<void>;
   onStructureCheck: () => void;
   onSecurityCheck: (connectionId: string) => Promise<void>;
   onApplyDefinitionText: (text: string) => void;
+  onToggleDiagnostic: (diagnosticId: string) => void;
+  onDismissDiagnostic: (diagnosticId: string) => void;
+  onClearChat: () => void;
   onReset: () => void;
   onClose: () => void;
 };
@@ -440,10 +453,14 @@ export function CustomNodeAssistantDialog({
   connections,
   defaultConnectionId,
   messages,
+  diagnostics,
   onSubmit,
   onStructureCheck,
   onSecurityCheck,
   onApplyDefinitionText,
+  onToggleDiagnostic,
+  onDismissDiagnostic,
+  onClearChat,
   onReset,
   onClose,
 }: CustomNodeAssistantDialogProps) {
@@ -468,6 +485,11 @@ export function CustomNodeAssistantDialog({
     () => customNodeDefinition(node.data.customNodeDefinition),
     [node.data.customNodeDefinition],
   );
+  const customNodeIsEmpty =
+    !definition.code.trim() &&
+    definition.inputs.length === 0 &&
+    definition.outputs.length === 0 &&
+    definition.controls.length === 0;
   const [previewDefinition, setPreviewDefinition] = useState<CustomNodeDefinition>(definition);
   const [previewDisplays, setPreviewDisplays] = useState<Record<string, string>>({});
   const [previewRuntimePortValues, setPreviewRuntimePortValues] = useState<Record<string, string>>({});
@@ -630,6 +652,14 @@ export function CustomNodeAssistantDialog({
             <button className="inspect-button nodrag" type="button" onClick={checkCodeSecurity} disabled={isCheckingSecurity}>
               {isCheckingSecurity ? 'Reviewing...' : 'Security Review'}
             </button>
+            <button
+              className="inspect-button nodrag"
+              type="button"
+              onClick={onClearChat}
+              disabled={messages.length === 0 && diagnostics.length === 0}
+            >
+              Delete Chat
+            </button>
             <div className="storybook-more-menu custom-node-more-menu">
               <button
                 className="inspect-button storybook-more-button nodrag"
@@ -773,7 +803,7 @@ export function CustomNodeAssistantDialog({
                     }}
                   >
                     <div
-                      className="workflow-node custom-node custom-node-preview-card"
+                      className={`workflow-node custom-node custom-node-preview-card${runStateClassName(node.data)}`}
                       style={{
                         transform: `translate(${previewPan.x}px, ${previewPan.y}px) scale(${previewZoom})`,
                       }}
@@ -825,27 +855,73 @@ export function CustomNodeAssistantDialog({
             <div className="storybook-chat-panel">
               <div className="storybook-chat-header">
                 <span className="panel-title">Node Assistant</span>
-                <span className="panel-subtitle">Describe the node you want. The assistant will later generate a checked definition.</span>
+                <span className="panel-subtitle">
+                  {customNodeIsEmpty
+                    ? 'Describe the node you want. The assistant will later generate a checked definition.'
+                    : 'Ask questions, describe changes, or paste an error you want fixed.'}
+                </span>
               </div>
+
+              {diagnostics.length > 0 && (
+                <div className="custom-node-diagnostics" aria-label="Custom Node diagnostics">
+                  {diagnostics.map((diagnostic) => (
+                    <div className="custom-node-diagnostic" key={diagnostic.id}>
+                      <div className="custom-node-diagnostic-row">
+                        <button
+                          className="custom-node-diagnostic-toggle"
+                          type="button"
+                          onClick={() => onToggleDiagnostic(diagnostic.id)}
+                          aria-expanded={diagnostic.expanded}
+                        >
+                          <span aria-hidden="true">{diagnostic.expanded ? 'v' : '>'}</span>
+                          <strong>{diagnostic.source}</strong>
+                        </button>
+                        <button
+                          className="custom-node-diagnostic-dismiss"
+                          type="button"
+                          onClick={() => onDismissDiagnostic(diagnostic.id)}
+                          aria-label={`Dismiss ${diagnostic.source}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                      {diagnostic.expanded && (
+                        <pre>{diagnostic.message}</pre>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="storybook-chat-log">
                 {messages.length === 0 ? (
-                  <div className="chat-empty-state">
-                    <div className="assistant-avatar-large">AI</div>
-                    <p className="empty-title">Build a Custom Node</p>
-                    <p className="empty-description">
-                      Ask for simple text, number, UI, routing, or LLM helper behavior.
-                    </p>
-                    <ul className="prompt-suggestions custom-node-prompt-suggestions">
-                      {customNodePromptSuggestions.map((suggestion) => (
-                        <li key={suggestion.title} onClick={() => setDraft(suggestion.prompt)}>
-                          <span className="prompt-suggestion-copy">
-                            <strong>{suggestion.title}</strong>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  customNodeIsEmpty ? (
+                    <div className="chat-empty-state">
+                      <div className="assistant-avatar-large">AI</div>
+                      <p className="empty-title">Build a Custom Node</p>
+                      <p className="empty-description">
+                        Ask for simple text, number, UI, routing, or LLM helper behavior.
+                      </p>
+                      <ul className="prompt-suggestions custom-node-prompt-suggestions">
+                        {customNodePromptSuggestions.map((suggestion) => (
+                          <li key={suggestion.title} onClick={() => setDraft(suggestion.prompt)}>
+                            <span className="prompt-suggestion-copy">
+                              <strong>{suggestion.title}</strong>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="chat-message-row assistant custom-node-ready-message">
+                      <div className="message-sender-avatar">AI</div>
+                      <div className="chat-message-bubble">
+                        <p>
+                          This Custom Node already has a definition. Ask me how it works, tell me what to change, or use the diagnostics above if a workflow run failed.
+                        </p>
+                      </div>
+                    </div>
+                  )
                 ) : (
                   messages.map((message, index) => (
                     <div className={`chat-message-row ${message.role}`} key={`${message.role}-${index}`}>
@@ -877,7 +953,7 @@ export function CustomNodeAssistantDialog({
                   className="nodrag nowheel"
                   rows={4}
                   value={draft}
-                  placeholder="Describe the Custom Node you want..."
+                  placeholder={customNodeIsEmpty ? 'Describe the Custom Node you want...' : 'Ask a question or describe the change you want...'}
                   onChange={(event) => setDraft(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {

@@ -49,7 +49,7 @@ export type CustomNodeDefinition = {
 export type CustomNodeAssistantResult = {
   reply: string;
   changedFields: string[];
-  definition: CustomNodeDefinition;
+  definition?: CustomNodeDefinition;
 };
 
 type CustomNodeCodePatch = {
@@ -194,6 +194,10 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function hasOwnKey(value: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function isCodePatch(value: unknown): value is CustomNodeCodePatch {
   return (
     isRecord(value) &&
@@ -287,21 +291,36 @@ export function parseCustomNodeAssistantResult(
   if (!isRecord(parsed)) {
     throw new Error('Assistant response is not a JSON object.');
   }
+  const reply = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
   const patch = parsed.patch;
   const definition = (() => {
-    if (isCustomNodeDefinition(parsed.definition)) {
+    const hasDefinition = hasOwnKey(parsed, 'definition');
+    const hasPatch = hasOwnKey(parsed, 'patch');
+    if (hasDefinition && hasPatch) {
+      throw new Error('Assistant response must include either "definition" or "patch", not both.');
+    }
+    if (hasDefinition && isCustomNodeDefinition(parsed.definition)) {
       return parsed.definition;
     }
-    if (isDefinitionPatch(patch)) {
+    if (hasDefinition) {
+      throw new Error('Assistant response included an invalid Custom Node definition.');
+    }
+    if (hasPatch && isDefinitionPatch(patch)) {
       return applyDefinitionPatch(fallbackDefinition, patch);
     }
-    throw new Error('Assistant response must include either a valid "definition" or a valid "patch".');
+    if (hasPatch) {
+      throw new Error('Assistant response included an invalid Custom Node patch.');
+    }
+    if (reply) {
+      return undefined;
+    }
+    throw new Error('Assistant response must include a valid "reply", "definition", or "patch".');
   })();
-  if (!isCustomNodeDefinition(definition)) {
+  if (definition && !isCustomNodeDefinition(definition)) {
     throw new Error('Assistant response produced an invalid Custom Node definition.');
   }
   return {
-    reply: typeof parsed.reply === 'string' ? parsed.reply : 'Custom Node updated.',
+    reply: reply || 'Custom Node updated.',
     changedFields: stringArray(parsed.changedFields).length
       ? stringArray(parsed.changedFields)
       : isDefinitionPatch(patch)
@@ -319,7 +338,9 @@ export function customNodeAssistantPrompt(
   return [
     'You are the Custom Node Assistant for RPGraph.',
     'Return only valid JSON. No markdown. No comments. No extra keys.',
-    'You create or edit one Custom Node definition. You are not editing RPGraph source code.',
+    'You can answer questions, create one Custom Node definition, or edit the current Custom Node definition. You are not editing RPGraph source code.',
+    'If the user asks a question or asks for an explanation, answer with a reply-only JSON object and do not include definition, patch, or changedFields.',
+    'If the user asks you to build, change, fix, rename, add, remove, or update the Custom Node, return a definition or patch.',
     'RPGraph is a node-based roleplay and story workflow tool. Custom Nodes should be useful for text processing, story processing, roleplay state, JSON transformation, routing, formatting, and controlled LLM calls.',
     'The Custom Node may only use data that comes from its connector inputs, its UI controls, its internal state, or the selected RPGraph LLM helper.',
     'The Custom Node must not access the computer, local disks, files, folders, environment variables, browser APIs, network, internet, external URLs, databases, plugins, shell commands, or hidden application internals.',
@@ -354,6 +375,8 @@ export function customNodeAssistantPrompt(
     'For outputs, use concrete types when the code validates and normalizes the value before returning it. Use number for normalized numbers, boolean for normalized booleans, json for arrays/objects, and text for known prose strings.',
     'For raw or lightly processed LLM responses, use output valueType "mixed" by default because downstream nodes may parse them as text, number, boolean, or JSON.',
     'For llmJson outputs, use concrete output types if the code validates each field before outputting it; use json when forwarding the full parsed object or array.',
+    'If a node computes a value from an input, create an output for that value unless the user explicitly wants display-only behavior.',
+    'A display-only Custom Node may have inputs and no outputs; it runs after the main RP output when it has an incoming connection and updates only its displays.',
     'Controls may include value, options, min, max, step, and layout, but visual order is controlled by array order.',
     'select and radio controls fall back to their first option when value is not set; set value explicitly when a different default is wanted.',
     'Non-button controls render full node width. Button controls render two per row by array order, or one alone when only one button is present.',
@@ -363,7 +386,8 @@ export function customNodeAssistantPrompt(
     'Use display type "meter" for a read-only green min/max/current bar. A meter display uses min, max, value, label, and optional text. Runtime code can update it by returning displays: { meter_id: currentValue }.',
     'If the user asks for UI-only behavior, inputs and outputs may be empty arrays.',
     'Buttons do not run code unless action is exactly "run-code".',
-    'Use exactly one dedicated run button with {"type":"button","action":"run-code"} when the user wants manual execution.',
+    'Custom Nodes run automatically when the workflow reaches their outputs. Do not add a Run button by default.',
+    'Use exactly one dedicated run button with {"type":"button","action":"run-code"} only when the user explicitly asks for manual execution or a manual test button.',
     'For mode choices, variants, on/off state, or internal switching, prefer checkbox, select, or radio controls.',
     'If the user explicitly asks for a button that only changes internal state, use action "set-state" or "toggle-state" with stateKey and optional stateValue.',
     'State-changing buttons do not compute outputs immediately; their state is used on the next workflow run or run-code button click.',
@@ -405,6 +429,7 @@ export function customNodeAssistantPrompt(
     'Do not return both definition and patch.',
     '',
     'Return one of these exact response shapes:',
+    '{"reply":"short user-facing answer"}',
     '{"reply":"short user-facing answer","changedFields":["title","inputs","outputs","controls","displays","code"],"definition":{"version":"1.0.0","title":"Short Functional Title","controls":[],"displays":[],"inputs":[],"outputs":[],"state":{},"code":""}}',
     '{"reply":"short user-facing answer","changedFields":["code"],"patch":{"codePatches":[{"find":"exact old code block","replace":"new code block"}]}}',
     '{"reply":"short user-facing answer","changedFields":["title"],"patch":{"title":"Short Functional Title"}}',

@@ -14,6 +14,7 @@ import {
   RunLlmReportDialog,
   StorybookCreatorDialog,
   SystemLogDialog,
+  type CustomNodeAssistantDiagnostic,
   type CustomNodeAssistantMessage,
 } from './components/AppDialogs';
 import {
@@ -998,6 +999,9 @@ function App() {
   const [jsonDialogNodeId, setJsonDialogNodeId] = useState<string | null>(null);
   const [customNodeAssistantNodeId, setCustomNodeAssistantNodeId] = useState<string | null>(null);
   const [customNodeAssistantHistories, setCustomNodeAssistantHistories] = useState<Record<string, CustomNodeAssistantMessage[]>>({});
+  const [customNodeAssistantDiagnostics, setCustomNodeAssistantDiagnostics] = useState<Record<string, CustomNodeAssistantDiagnostic[]>>({});
+  const customNodeLastRunErrorRef = useRef<Record<string, string>>({});
+  const customNodeDiagnosticCounterRef = useRef(0);
   const [nodeAssistantNodeId, setNodeAssistantNodeId] = useState<string | null>(null);
   const [nodeAssistantHistories, setNodeAssistantHistories] = useState<Record<string, AssistantChatMessage[]>>({});
   const [assistantConnectionId, setAssistantConnectionId] = useState<string | undefined>(
@@ -2585,6 +2589,7 @@ function App() {
     resetSnapshotFileName?: string,
     hydrateOpeningHistory = true,
   ) {
+    clearCustomNodeAssistantState();
     clearTemporaryReferenceImages();
     if (hydrateOpeningHistory) {
       clearTurnTraces();
@@ -2656,6 +2661,109 @@ function App() {
     }
   }
 
+  const appendCustomNodeAssistantDiagnostic = useCallback((
+    nodeId: string,
+    source: string,
+    message: string,
+    expanded = true,
+  ) => {
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      return;
+    }
+    customNodeDiagnosticCounterRef.current += 1;
+    const diagnostic: CustomNodeAssistantDiagnostic = {
+      id: `${nodeId}-${Date.now()}-${customNodeDiagnosticCounterRef.current}`,
+      source,
+      message: trimmedMessage,
+      createdAt: Date.now(),
+      expanded,
+    };
+    setCustomNodeAssistantDiagnostics((current) => {
+      const existing = current[nodeId] ?? [];
+      const deduped = existing.filter(
+        (entry) => entry.source !== diagnostic.source || entry.message !== diagnostic.message,
+      );
+      return {
+        ...current,
+        [nodeId]: [...deduped, diagnostic].slice(-8),
+      };
+    });
+  }, []);
+
+  function toggleCustomNodeAssistantDiagnostic(nodeId: string, diagnosticId: string) {
+    setCustomNodeAssistantDiagnostics((current) => ({
+      ...current,
+      [nodeId]: (current[nodeId] ?? []).map((entry) =>
+        entry.id === diagnosticId ? { ...entry, expanded: !entry.expanded } : entry,
+      ),
+    }));
+  }
+
+  function dismissCustomNodeAssistantDiagnostic(nodeId: string, diagnosticId: string) {
+    setCustomNodeAssistantDiagnostics((current) => ({
+      ...current,
+      [nodeId]: (current[nodeId] ?? []).filter((entry) => entry.id !== diagnosticId),
+    }));
+  }
+
+  function clearCustomNodeAssistantChat(nodeId: string) {
+    setCustomNodeAssistantHistories((current) => ({
+      ...current,
+      [nodeId]: [],
+    }));
+    setCustomNodeAssistantDiagnostics((current) => ({
+      ...current,
+      [nodeId]: [],
+    }));
+    delete customNodeLastRunErrorRef.current[nodeId];
+    updateRuntimeNode(nodeId, {
+      runActive: false,
+      runCompleted: false,
+      runPrepared: false,
+      runError: undefined,
+    });
+  }
+
+  function clearCustomNodeAssistantState() {
+    setCustomNodeAssistantHistories({});
+    setCustomNodeAssistantDiagnostics({});
+    customNodeLastRunErrorRef.current = {};
+    setCustomNodeAssistantNodeId(null);
+  }
+
+  function customNodeAssistantDiagnosticContext(nodeId: string) {
+    const diagnostics = customNodeAssistantDiagnostics[nodeId] ?? [];
+    if (!diagnostics.length) {
+      return '';
+    }
+    return diagnostics
+      .map((entry) => `DIAGNOSTIC ${entry.source}: ${entry.message}`)
+      .join('\n\n');
+  }
+
+  useEffect(() => {
+    nodeViewNodes.forEach((node) => {
+      if (node.data.kind !== undefined || node.data.nodeType !== 'custom') {
+        return;
+      }
+      const runError = node.data.runError?.trim();
+      if (!runError) {
+        delete customNodeLastRunErrorRef.current[node.id];
+        return;
+      }
+      if (customNodeLastRunErrorRef.current[node.id] === runError) {
+        return;
+      }
+      customNodeLastRunErrorRef.current[node.id] = runError;
+      appendCustomNodeAssistantDiagnostic(
+        node.id,
+        'Workflow run error',
+        `${node.data.label}: ${runError}`,
+      );
+    });
+  }, [appendCustomNodeAssistantDiagnostic, nodeViewNodes]);
+
   async function submitCustomNodeAssistantMessage(message: string, connectionId: string) {
     const nodeId = customNodeAssistantNodeId;
     const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
@@ -2663,10 +2771,12 @@ function App() {
       return;
     }
     const previousAssistantMessages = customNodeAssistantHistories[nodeId] ?? [];
-    const assistantContext = previousAssistantMessages
+    const recentChatContext = previousAssistantMessages
       .slice(-12)
       .map((entry) => `${entry.role.toUpperCase()}: ${entry.text}`)
       .join('\n\n');
+    const diagnosticContext = customNodeAssistantDiagnosticContext(nodeId);
+    const assistantContext = [diagnosticContext, recentChatContext].filter(Boolean).join('\n\n');
 
     setCustomNodeAssistantHistories((current) => ({
       ...current,
@@ -2684,12 +2794,19 @@ function App() {
         prompt: customNodeAssistantPrompt(currentDefinition, message, assistantContext),
       });
       const result = parseCustomNodeAssistantResult(completion.text, currentDefinition);
-      assertCompilableCustomNodeCode(result.definition.code);
-      updateRuntimeNode(nodeId, {
-        customNodeDefinition: result.definition,
-        connectionId,
-        preview: `Updated via ${completion.connection.label}`,
-      });
+      if (result.definition) {
+        assertCompilableCustomNodeCode(result.definition.code);
+        updateRuntimeNode(nodeId, {
+          customNodeDefinition: result.definition,
+          connectionId,
+          preview: `Updated via ${completion.connection.label}`,
+        });
+      } else {
+        updateRuntimeNode(nodeId, {
+          connectionId,
+          preview: `Answered via ${completion.connection.label}`,
+        });
+      }
       const changed = result.changedFields.length
         ? `Changed: ${result.changedFields.slice(0, 5).join(', ')}. `
         : '';
@@ -2738,6 +2855,9 @@ function App() {
       const definition = isCustomNodeDefinition(parsed)
         ? parsed
         : parseCustomNodeAssistantResult(text, currentDefinition).definition;
+      if (!definition) {
+        throw new Error('Pasted text contains only an assistant reply, not a Custom Node definition or patch.');
+      }
       assertCompilableCustomNodeCode(definition.code);
       updateRuntimeNode(nodeId, {
         customNodeDefinition: definition,
@@ -2766,6 +2886,11 @@ function App() {
       runtimePortValues: {},
       preview: 'Custom Node reset',
     });
+    setCustomNodeAssistantDiagnostics((current) => ({
+      ...current,
+      [nodeId]: [],
+    }));
+    delete customNodeLastRunErrorRef.current[nodeId];
     appendCustomNodeAssistantMessage(nodeId, {
       role: 'assistant',
       text: 'Custom Node reset to the default empty definition.',
@@ -2801,6 +2926,11 @@ function App() {
             seen.add(entry);
           });
         });
+        if (definition.inputs.length > 0 && definition.outputs.length === 0) {
+          issues.push(
+            'This Custom Node has inputs but no outputs. It can update displays during a workflow run, but it cannot pass a value to another node.',
+          );
+        }
         definition.outputs.forEach((port) => {
           if (!definition.code.includes(port.id)) {
             issues.push(`Output "${port.id}" is defined, but the code does not visibly reference that id.`);
@@ -2889,7 +3019,14 @@ function App() {
       return;
     }
     const definition = customNodeDefinition(node.data.customNodeDefinition);
-    updateRuntimeNode(nodeId, { preview: `${label} running ...`, llmCallStats: [] });
+    updateRuntimeNode(nodeId, {
+      preview: `${label} running ...`,
+      llmCallStats: [],
+      runActive: true,
+      runCompleted: false,
+      runPrepared: false,
+      runError: undefined,
+    });
     try {
       const currentInputImages = Array.from(
         new Map([...draftImages, ...phoneImages].map((image) => [image.id, image])).values(),
@@ -2932,11 +3069,21 @@ function App() {
           ...definition,
           state: result.state,
         },
+        runActive: false,
+        runCompleted: true,
+        runPrepared: false,
+        runError: undefined,
       });
     } catch (error) {
+      const messageText = errorMessage(error);
       updateRuntimeNode(nodeId, {
-        preview: `${label} failed: ${errorMessage(error)}`,
+        preview: `${label} failed: ${messageText}`,
+        runActive: false,
+        runCompleted: false,
+        runPrepared: false,
+        runError: messageText,
       });
+      appendCustomNodeAssistantDiagnostic(nodeId, `${label} run error`, messageText);
     }
   }
 
@@ -4824,6 +4971,9 @@ function App() {
   const customNodeAssistantMessages = customNodeAssistantNodeId
     ? (customNodeAssistantHistories[customNodeAssistantNodeId] || [])
     : [];
+  const customNodeAssistantActiveDiagnostics = customNodeAssistantNodeId
+    ? (customNodeAssistantDiagnostics[customNodeAssistantNodeId] || [])
+    : [];
   const nodeAssistantNode = nodeViewNodes.find((node) => node.id === nodeAssistantNodeId);
   const nodeAssistantMessages = nodeAssistantNodeId ? (nodeAssistantHistories[nodeAssistantNodeId] || []) : [];
   const workflowAssistantSnapshotJson = useMemo(
@@ -5782,10 +5932,18 @@ function App() {
           connections={connections}
           defaultConnectionId={defaultConnectionId}
           messages={customNodeAssistantMessages}
+          diagnostics={customNodeAssistantActiveDiagnostics}
           onSubmit={submitCustomNodeAssistantMessage}
           onStructureCheck={() => checkCustomNodeStructure(customNodeAssistantNode.id)}
           onSecurityCheck={(connectionId) => checkCustomNodeSecurity(customNodeAssistantNode.id, connectionId)}
           onApplyDefinitionText={(text) => applyCustomNodeDefinitionText(customNodeAssistantNode.id, text)}
+          onToggleDiagnostic={(diagnosticId) =>
+            toggleCustomNodeAssistantDiagnostic(customNodeAssistantNode.id, diagnosticId)
+          }
+          onDismissDiagnostic={(diagnosticId) =>
+            dismissCustomNodeAssistantDiagnostic(customNodeAssistantNode.id, diagnosticId)
+          }
+          onClearChat={() => clearCustomNodeAssistantChat(customNodeAssistantNode.id)}
           onReset={() => resetCustomNodeDefinition(customNodeAssistantNode.id)}
           onClose={() => setCustomNodeAssistantNodeId(null)}
         />
