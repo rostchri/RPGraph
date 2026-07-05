@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { WorkflowNode } from '../../types';
 import { useNodeActions } from '../NodeActionsContext';
 import { LlmCallMetrics, runStateClassName, useNodeLayoutSync } from '../shared/CardView';
@@ -118,6 +118,9 @@ export function CustomNodeBody({
   onGeneratedButtonClick?: (label: string) => void;
   onStateButtonClick?: (control: CustomNodeElement) => void;
 }) {
+  // Radio groups are scoped per rendered node; a shared control id in two
+  // Custom Nodes must not merge their radios into one document-wide group.
+  const radioGroupPrefix = useId();
   return (
     <>
       <div className="node-title-row custom-node-title-row">
@@ -176,7 +179,7 @@ export function CustomNodeBody({
                     type="checkbox"
                     checked={Boolean(value)}
                     onChange={(event) => onControlChange?.(control.id, event.currentTarget.checked)}
-                    readOnly={!onControlChange}
+                    disabled={!onControlChange}
                   />
                   <span>{control.label}</span>
                 </label>
@@ -196,7 +199,7 @@ export function CustomNodeBody({
                       step={control.step ?? 1}
                       value={numberValue}
                       onChange={(event) => onControlChange?.(control.id, Number(event.currentTarget.value))}
-                      readOnly={!onControlChange}
+                      disabled={!onControlChange}
                     />
                     <span>{numberValue}</span>
                   </div>
@@ -242,7 +245,7 @@ export function CustomNodeBody({
                       <input
                         className="nodrag"
                         type="radio"
-                        name={`${control.id}-radio`}
+                        name={`${radioGroupPrefix}-${control.id}-radio`}
                         value={option}
                         checked={selected === option}
                         onChange={(event) => onControlChange?.(control.id, event.currentTarget.value)}

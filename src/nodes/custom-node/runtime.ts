@@ -1,4 +1,3 @@
-import type { PortSnapshot } from '../../types';
 import { runtimePortValueKey } from '../shared/portRuntime';
 import type { CustomNodeDefinition, CustomNodeElement } from './model';
 
@@ -54,7 +53,7 @@ export async function runCustomNodeDefinition(
     : definition.state;
   return {
     outputs: stringifyRecord(result.outputs),
-    displays: stringifyRecord(result.displays ?? result.display),
+    displays: stringifyRecord(result.displays),
     state: nextState,
   };
 }
@@ -106,31 +105,105 @@ export function outputRuntimePortValues(
   );
 }
 
-export function declaredOutputValue(outputs: Record<string, string>, sourceHandle: string | null | undefined, outputsDefinition: PortSnapshot[]) {
-  const handle = sourceHandle ?? outputsDefinition[0]?.id ?? 'default';
-  return outputs[handle] ?? '';
+export function assertAllowedCustomNodeCode(code: string) {
+  const forbidden: Array<[string, RegExp]> = [
+    ['import', /\bimport\b/],
+    ['require', /\brequire\s*\(/],
+    ['fetch', /\bfetch\s*\(/],
+    ['XMLHttpRequest', /\bXMLHttpRequest\b/],
+    ['WebSocket', /\bWebSocket\b/],
+    ['EventSource', /\bEventSource\b/],
+    ['window', /\bwindow\b/],
+    ['document', /\bdocument\b/],
+    ['globalThis', /\bglobalThis\b/],
+    ['self', /\bself\b/],
+    ['process', /\bprocess\b/],
+    ['eval', /\beval\s*\(/],
+    ['Function', /\bFunction\s*\(/],
+    ['constructor', /\bconstructor\b/],
+  ];
+  const scannable = stripStringsAndComments(code);
+  const hit = forbidden.find(([, pattern]) => pattern.test(scannable));
+  if (hit) {
+    throw new Error(`Custom Node code uses a blocked JavaScript API: ${hit[0]}`);
+  }
 }
 
-export function assertAllowedCustomNodeCode(code: string) {
-  const forbidden = [
-    /\bimport\b/,
-    /\brequire\s*\(/,
-    /\bfetch\s*\(/,
-    /\bXMLHttpRequest\b/,
-    /\bWebSocket\b/,
-    /\bEventSource\b/,
-    /\bwindow\b/,
-    /\bdocument\b/,
-    /\bglobalThis\b/,
-    /\bself\b/,
-    /\bprocess\b/,
-    /\beval\s*\(/,
-    /\bFunction\s*\(/,
-  ];
-  const hit = forbidden.find((pattern) => pattern.test(code));
-  if (hit) {
-    throw new Error('Custom Node code uses a blocked JavaScript API.');
+// Removes string literal and comment text so the blocked-API scan only sees real
+// code — prompt strings may legitimately contain words like "window" or "process".
+// Template literal ${...} expressions are code and stay in the scanned output.
+function stripStringsAndComments(code: string): string {
+  let result = '';
+  let i = 0;
+
+  function skipQuoted(quote: string) {
+    i += 1;
+    while (i < code.length && code[i] !== quote) {
+      i += code[i] === '\\' ? 2 : 1;
+    }
+    i += 1;
   }
+
+  function skipTemplate() {
+    i += 1;
+    while (i < code.length && code[i] !== '`') {
+      if (code[i] === '\\') {
+        i += 2;
+        continue;
+      }
+      if (code[i] === '$' && code[i + 1] === '{') {
+        i += 2;
+        result += ' ';
+        scanCode(true);
+        continue;
+      }
+      i += 1;
+    }
+    i += 1;
+  }
+
+  function scanCode(insideTemplateExpression: boolean) {
+    let depth = 0;
+    while (i < code.length) {
+      const char = code[i];
+      const next = code[i + 1];
+      if (char === '/' && next === '/') {
+        while (i < code.length && code[i] !== '\n') i += 1;
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        i += 2;
+        while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) i += 1;
+        i += 2;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        skipQuoted(char);
+        result += ' ';
+        continue;
+      }
+      if (char === '`') {
+        skipTemplate();
+        result += ' ';
+        continue;
+      }
+      if (insideTemplateExpression) {
+        if (char === '{') depth += 1;
+        if (char === '}') {
+          if (depth === 0) {
+            i += 1;
+            return;
+          }
+          depth -= 1;
+        }
+      }
+      result += char;
+      i += 1;
+    }
+  }
+
+  scanCode(false);
+  return result;
 }
 
 export function assertCompilableCustomNodeCode(code: string) {
@@ -138,24 +211,8 @@ export function assertCompilableCustomNodeCode(code: string) {
   if (!code.trim()) {
     return;
   }
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor;
   try {
-    new AsyncFunction(
-      'inputs',
-      'controls',
-      'state',
-      'llm',
-      'llmJson',
-      'json',
-      'number',
-      'text',
-      'clamp',
-      'words',
-      'lines',
-      '"use strict";\n' +
-        'const window = undefined, document = undefined, globalThis = undefined, self = undefined, fetch = undefined, XMLHttpRequest = undefined, WebSocket = undefined, EventSource = undefined, require = undefined, process = undefined;\n' +
-        code,
-    );
+    compileCustomNodeRunner(code);
   } catch (error) {
     const wrapped = new Error(`Custom Node code does not compile: ${error instanceof Error ? error.message : String(error)}`);
     (wrapped as Error & { cause?: unknown }).cause = error;
@@ -174,6 +231,11 @@ function coerceControlValue(control: CustomNodeElement) {
   if (control.type === 'number-input') {
     const parsed = Number(control.value ?? 0);
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (control.type === 'select' || control.type === 'radio') {
+    // Match the card UI, which shows the first option as selected when no value is set.
+    const value = typeof control.value === 'string' ? control.value : '';
+    return value || control.options?.[0] || '';
   }
   return control.value ?? '';
 }
@@ -194,6 +256,43 @@ function stringifyRecord(value: unknown) {
   );
 }
 
+type CustomNodeRunner = (
+  inputs: Record<string, unknown>,
+  controls: Record<string, unknown>,
+  state: Record<string, unknown>,
+  llm: CustomNodeLlm,
+  llmJson: CustomNodeHelpers['llmJson'],
+  json: CustomNodeHelpers['json'],
+  number: CustomNodeHelpers['number'],
+  text: CustomNodeHelpers['text'],
+  clamp: CustomNodeHelpers['clamp'],
+  words: CustomNodeHelpers['words'],
+  lines: CustomNodeHelpers['lines'],
+) => Promise<unknown>;
+
+const customNodeRunnerArgs = [
+  'inputs',
+  'controls',
+  'state',
+  'llm',
+  'llmJson',
+  'json',
+  'number',
+  'text',
+  'clamp',
+  'words',
+  'lines',
+] as const;
+
+const customNodeRunnerPrelude =
+  '"use strict";\n' +
+  'const window = undefined, document = undefined, globalThis = undefined, self = undefined, fetch = undefined, XMLHttpRequest = undefined, WebSocket = undefined, EventSource = undefined, require = undefined, process = undefined;\n';
+
+function compileCustomNodeRunner(code: string): CustomNodeRunner {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor;
+  return new AsyncFunction(...customNodeRunnerArgs, customNodeRunnerPrelude + code) as CustomNodeRunner;
+}
+
 async function runCustomNodeCode(
   code: string,
   args: {
@@ -205,35 +304,7 @@ async function runCustomNodeCode(
   },
 ) {
   assertAllowedCustomNodeCode(code);
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as FunctionConstructor;
-  const runner = new AsyncFunction(
-    'inputs',
-    'controls',
-    'state',
-    'llm',
-    'llmJson',
-    'json',
-    'number',
-    'text',
-    'clamp',
-    'words',
-    'lines',
-    '"use strict";\n' +
-      'const window = undefined, document = undefined, globalThis = undefined, self = undefined, fetch = undefined, XMLHttpRequest = undefined, WebSocket = undefined, EventSource = undefined, require = undefined, process = undefined;\n' +
-      code,
-  ) as (
-    inputs: Record<string, unknown>,
-    controls: Record<string, unknown>,
-    state: Record<string, unknown>,
-    llm: CustomNodeLlm,
-    llmJson: CustomNodeHelpers['llmJson'],
-    json: CustomNodeHelpers['json'],
-    number: CustomNodeHelpers['number'],
-    text: CustomNodeHelpers['text'],
-    clamp: CustomNodeHelpers['clamp'],
-    words: CustomNodeHelpers['words'],
-    lines: CustomNodeHelpers['lines'],
-  ) => Promise<unknown>;
+  const runner = compileCustomNodeRunner(code);
   const llm = args.llm ?? (async () => {
     throw new Error('Custom Node LLM helper is not available in this run.');
   });
@@ -256,7 +327,6 @@ async function runCustomNodeCode(
   return result as {
     outputs?: unknown;
     displays?: unknown;
-    display?: unknown;
     state?: unknown;
   };
 }

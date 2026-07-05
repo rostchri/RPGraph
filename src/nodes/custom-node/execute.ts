@@ -6,11 +6,7 @@ import {
   customNodeImagesForRequest,
 } from './images';
 import { customNodeDefinition } from './model';
-import {
-  coercePortValue,
-  declaredOutputValue,
-  runCustomNodeDefinition,
-} from './runtime';
+import { coercePortValue, runCustomNodeDefinition } from './runtime';
 
 export async function executeCustomNode(node: WorkflowNode, context: ExecuteContext): Promise<string> {
   const definition = customNodeDefinition(node.data.customNodeDefinition);
@@ -58,7 +54,7 @@ export async function executeCustomNode(node: WorkflowNode, context: ExecuteCont
     },
   });
   const sourceHandle = context.sourceHandle ?? definition.outputs[0]?.id ?? 'default';
-  const outputValue = declaredOutputValue(result.outputs, sourceHandle, definition.outputs);
+  const outputValue = result.outputs[sourceHandle] ?? '';
 
   context.updateRuntimeData(node.id, {
     preview: definition.outputs.length
