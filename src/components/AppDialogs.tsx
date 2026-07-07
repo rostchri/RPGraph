@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { DarkAudioPlayer } from './DarkAudioPlayer';
+import { LiveRunClock } from './LiveRunClock';
 import { outputFormatHelp, type OutputFormatHelpKind } from '../nodes/output/formatHelp';
 import { CustomNodeBody } from '../nodes/custom-node/Card';
 import {
@@ -176,12 +177,14 @@ export function RunLlmReportDialog({
   currentDurationMs,
   history,
   isRunning,
+  runStartTimeMs,
   onClose,
 }: {
   currentReport: RunLlmReport;
   currentDurationMs: number;
   history: LlmRunHistoryEntry[];
   isRunning: boolean;
+  runStartTimeMs: number | null;
   onClose: () => void;
 }) {
   const backdropDismiss = useBackdropDismiss<HTMLDivElement>(onClose);
@@ -200,7 +203,9 @@ export function RunLlmReportDialog({
           <div className="run-llm-card-row">
             <span className="run-llm-card-label">Duration</span>
             <span className="run-llm-card-value font-mono">
-              {durationMs !== undefined ? `${formatRuntimeSeconds(durationMs)} s` : '-'}
+              {isCurrent && isRunning
+                ? <><LiveRunClock isRunning={isRunning} startTimeMs={runStartTimeMs} finalMs={durationMs ?? 0} /> s</>
+                : durationMs !== undefined ? `${formatRuntimeSeconds(durationMs)} s` : '-'}
             </span>
           </div>
           <div className="run-llm-card-row">

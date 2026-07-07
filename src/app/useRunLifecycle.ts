@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type {
   LlmRunHistoryEntry,
   RunLlmReport,
@@ -25,20 +25,16 @@ export function useRunLifecycle() {
   const pendingRunRestart = useRef<(() => void) | null>(null);
   const runStartTimeRef = useRef<number | null>(null);
   const runEndTimeRef = useRef<number | null>(null);
+  // Render-safe mirror of runStartTimeRef for the <LiveRunClock> instances
+  // (React forbids reading refs during render).
+  const [runStartTimeMs, setRunStartTimeMs] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!isRunning) {
-      return;
-    }
-    const intervalId = setInterval(() => {
-      if (runStartTimeRef.current !== null) {
-        setRunDurationMs(performance.now() - runStartTimeRef.current);
-      }
-    }, 50);
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [isRunning]);
+  // NOTE: the live run-duration display is driven by the self-contained
+  // <LiveRunClock> leaf component, NOT by an App-level interval. A former 50ms
+  // setRunDurationMs interval here re-rendered the ENTIRE app (incl. the whole
+  // conversation) 20x/second; on a large session each render takes ~750ms, so
+  // they ran back-to-back and pegged the main thread for the whole run, freezing
+  // the tab. The final duration is set once in runGraph's finishRun().
 
   function updateWorkflowComfyGenerationActive(active: boolean) {
     workflowComfyGenerationActiveCountRef.current = Math.max(
@@ -83,6 +79,8 @@ export function useRunLifecycle() {
     pendingRunRestartRef: pendingRunRestart,
     runStartTimeRef,
     runEndTimeRef,
+    runStartTimeMs,
+    setRunStartTimeMs,
     cancelCurrentRun,
   };
 }
