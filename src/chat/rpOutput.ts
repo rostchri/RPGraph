@@ -54,7 +54,12 @@ function trailingRpImageMetadata(value: string) {
   if (!text.endsWith('}')) {
     return undefined;
   }
-  for (let start = text.lastIndexOf('{'); start >= 0; start = text.lastIndexOf('{', start - 1)) {
+  // NOTE: `String.lastIndexOf('{', -1)` clamps the negative fromIndex to 0 and so
+  // returns 0 again when the text starts with '{'. Advancing via `start - 1`
+  // therefore spins forever on inputs like `{"image":""}` (a JSON object at
+  // index 0 whose metadata is empty/invalid, e.g. an empty/refused image prompt).
+  // Stop once we reach the opening brace at index 0 instead of re-searching from -1.
+  for (let start = text.lastIndexOf('{'); start >= 0; start = start <= 0 ? -1 : text.lastIndexOf('{', start - 1)) {
     try {
       const metadata = JSON.parse(text.slice(start)) as unknown;
       const parsedMetadata = rpOutputMetadata(metadata);
