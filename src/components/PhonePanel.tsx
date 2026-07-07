@@ -9,8 +9,10 @@ import { defaultPhoneChatTextSize } from '../settings';
 import type { StorybookCharacter } from '../storybook/runtime';
 import type {
   ChatImageAttachment,
+  ConnectionPreset,
   ImageCaptionChange,
   MessageRecord,
+  ProviderConnectionHealth,
   RpDateTimeFormat,
   RpWeekdayLanguage,
 } from '../types';
@@ -31,6 +33,13 @@ import {
   type CommandPillComposerHandle,
 } from './CommandPillComposer';
 import type { CommandInputCommand } from '../chat/structuredCommands';
+import type {
+  ImageGenerationAssistantMessage,
+  ImageGenerationAssistantResult,
+  ImageGenerationSettings,
+  ImageAssistantModelState,
+} from '../chat/imageGenerationAssistant';
+import { imageGenerationCharacterContext } from '../chat/imageGenerationAssistant';
 
 type PhoneContact = {
   character: StorybookCharacter;
@@ -118,6 +127,37 @@ type PhonePanelProps = {
   onSelectPhoneImages: () => void;
   onSelectPhoneGalleryImage: (image: ChatImageAttachment) => void;
   onAddPhoneImages: (files: FileList | null) => void;
+  connections?: ConnectionPreset[];
+  providerHealthById?: Record<string, ProviderConnectionHealth>;
+  estimatedTokenBytesPerToken: number;
+  imageAssistantChatHistoryContext: string;
+  onSubmitImageAssistantMessage: (request: {
+    connectionId: string;
+    imageProviderId: string;
+    currentPrompt: string;
+    currentSettings: ImageGenerationSettings;
+    currentImage?: { dataUrl: string; description: string };
+    availableCharacterLoras: string[];
+    characterContext: string;
+    chatHistoryContext: string;
+    messages: ImageGenerationAssistantMessage[];
+    userMessage: string;
+    describeImage?: boolean;
+  }) => Promise<ImageGenerationAssistantResult>;
+  onGenerateImageAssistantImages: (request: {
+    providerId: string;
+    prompt: string;
+    settings: ImageGenerationSettings;
+  }) => Promise<string[]>;
+  onSaveImageAssistantImage: (request: {
+    characterId: string;
+    dataUrl: string;
+    description: string;
+  }) => Promise<void>;
+  imageAssistantModelStateById: Record<string, ImageAssistantModelState>;
+  onSetImageAssistantLlmModelLoaded: (providerId: string, loaded: boolean) => Promise<void>;
+  onUnloadImageAssistantComfyModel: (providerId: string) => Promise<void>;
+  onRefreshImageAssistantModelState: (providerId: string) => void;
 };
 
 export function PhonePanel({
@@ -179,6 +219,17 @@ export function PhonePanel({
   onSelectPhoneImages,
   onSelectPhoneGalleryImage,
   onAddPhoneImages,
+  connections = [],
+  providerHealthById = {},
+  estimatedTokenBytesPerToken,
+  imageAssistantChatHistoryContext,
+  onSubmitImageAssistantMessage,
+  onGenerateImageAssistantImages,
+  onSaveImageAssistantImage,
+  imageAssistantModelStateById,
+  onSetImageAssistantLlmModelLoaded,
+  onUnloadImageAssistantComfyModel,
+  onRefreshImageAssistantModelState,
 }: PhonePanelProps) {
   const commandComposerRef = useRef<CommandPillComposerHandle | null>(null);
   const isImageInContext = (image: ChatImageAttachment) =>
@@ -629,6 +680,25 @@ export function PhonePanel({
                       uploadDisabledReason={imageUploadDisabledReason}
                       onSelectImage={onSelectPhoneGalleryImage}
                       onUploadFromComputer={onSelectPhoneImages}
+                      connections={connections}
+                      providerHealthById={providerHealthById}
+                      availableCharacterLoras={storyCharacters.flatMap((character) => {
+                        const loraName = character.comfyConfig?.loraName.trim();
+                        return loraName ? [`${character.name}: ${loraName}`] : [];
+                      })}
+                      characterContext={imageGenerationCharacterContext(storyCharacters)}
+                      characterCount={storyCharacters.length}
+                      chatHistoryContext={imageAssistantChatHistoryContext}
+                      estimatedTokenBytesPerToken={estimatedTokenBytesPerToken}
+                      saveCharacters={storyCharacters}
+                      preferredSaveCharacterId={selectedCharacter?.id}
+                      onSubmitImageAssistantMessage={onSubmitImageAssistantMessage}
+                      onGenerateImageAssistantImages={onGenerateImageAssistantImages}
+                      onSaveImageAssistantImage={onSaveImageAssistantImage}
+                      imageAssistantModelStateById={imageAssistantModelStateById}
+                      onSetImageAssistantLlmModelLoaded={onSetImageAssistantLlmModelLoaded}
+                      onUnloadImageAssistantComfyModel={onUnloadImageAssistantComfyModel}
+                      onRefreshImageAssistantModelState={onRefreshImageAssistantModelState}
                     />
                   </div>
                 </div>

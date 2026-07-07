@@ -61,6 +61,11 @@ import {
   extractDialogueQuotes,
 } from './chat/textRendering';
 import {
+  imageGenerationAssistantPrompt,
+  parseImageGenerationAssistantResult,
+} from './chat/imageGenerationAssistant';
+import { lastTurnMessages } from './data-management/historyStore';
+import {
   chatAttachmentFromStorybookImage,
   findChatEndpoints,
   storybookOpeningSituation,
@@ -182,6 +187,7 @@ import {
   isOpenRouterConnection,
 } from './llm/providerKind';
 import { TextMetricsApi } from './llm/tokenMetrics';
+import { encodedDataUrlBytes, normalizeImageAttachment } from './utils/imageNormalization';
 import { NodeActionsContext } from './nodes/NodeActionsContext';
 import type { OutputFormatHelpKind } from './nodes/output/formatHelp';
 import type { ExecuteTraceFormatResult } from './nodes/types';
@@ -1255,6 +1261,7 @@ function App() {
     comfyWorkflowInspection,
     connectionStatus,
     providerHealthById,
+    imageAssistantModelStateById,
     comfyProviderActionActive,
     voiceGenerationActive,
     lmStudioModelActionActive,
@@ -1296,6 +1303,11 @@ function App() {
     checkProviderConnections,
     loadCharacterComfyLoras,
     generateCharacterComfyPreview,
+    generateImageAssistantImages,
+    prepareImageAssistantLlmProvider,
+    setImageAssistantLlmModelLoaded,
+    unloadImageAssistantComfyModel,
+    refreshImageAssistantModelState,
     generateCharacterVoicePreview,
     unloadCharacterComfyModels,
     resolveConnection,
@@ -6049,6 +6061,14 @@ function App() {
             <PhonePanel
               phoneContacts={phoneContacts}
               storyCharacters={storyCharacters}
+              estimatedTokenBytesPerToken={activeTokenEstimateBytesPerToken}
+              imageAssistantChatHistoryContext={formatChatHistory(
+                lastTurnMessages(messages, 4),
+                false,
+                rpDateTimeFormat,
+                rpWeekdayLanguage,
+                messages,
+              )}
               characterColors={characterColors}
               selectedPhoneContact={selectedPhoneContact}
               selectedCharacter={viewedPhoneCharacter}
@@ -6144,6 +6164,94 @@ function App() {
               onSelectPhoneImages={selectPhoneImagesFromComposer}
               onSelectPhoneGalleryImage={selectPhoneGalleryImageFromComposer}
               onAddPhoneImages={addPhoneImagesFromComposer}
+              connections={connections}
+              providerHealthById={providerHealthById}
+              onSubmitImageAssistantMessage={async ({
+                connectionId,
+                imageProviderId,
+                currentPrompt,
+                currentSettings,
+                currentImage,
+                availableCharacterLoras,
+                characterContext,
+                chatHistoryContext,
+                messages,
+                userMessage,
+                describeImage,
+              }) => {
+                await prepareImageAssistantLlmProvider({
+                  llmProviderId: connectionId,
+                  comfyProviderId: imageProviderId,
+                });
+                if (currentImage) {
+                  const visionEnabled = await nodeLlm.supportsVision(
+                    connectionId,
+                    'Image Generation Assistant',
+                  );
+                  if (!visionEnabled) {
+                    throw new Error('The selected assistant provider needs vision enabled to inspect the generated image.');
+                  }
+                }
+                const completion = await nodeLlm.complete({
+                  connectionId,
+                  label: 'Image Generation Assistant',
+                  prompt: imageGenerationAssistantPrompt(
+                    currentPrompt,
+                    currentSettings,
+                    currentImage?.description ?? '',
+                    availableCharacterLoras,
+                    characterContext,
+                    chatHistoryContext,
+                    messages,
+                    userMessage,
+                    describeImage,
+                  ),
+                  images: currentImage ? [{
+                    id: 'image-generation-assistant-current',
+                    name: 'Currently selected generated image',
+                    mimeType: /^data:([^;,]+)/.exec(currentImage.dataUrl)?.[1] ?? 'image/png',
+                    size: encodedDataUrlBytes(currentImage.dataUrl),
+                    dataUrl: currentImage.dataUrl,
+                    description: currentImage.description,
+                  }] : undefined,
+                  maxTokens: 1200,
+                  temperature: 0.2,
+                });
+                return parseImageGenerationAssistantResult(completion.text);
+              }}
+              onGenerateImageAssistantImages={generateImageAssistantImages}
+              onSaveImageAssistantImage={async ({ characterId, dataUrl, description }) => {
+                const character = storyCharacters.find((entry) => entry.id === characterId);
+                if (!character) {
+                  throw new Error('The selected Storybook character is no longer available.');
+                }
+                const mimeType = /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? 'image/png';
+                const image = await normalizeImageAttachment({
+                  name: `generated-${character.name}.png`,
+                  mimeType,
+                  size: encodedDataUrlBytes(dataUrl),
+                  dataUrl,
+                }, () => `image-${uniqueId()}`);
+                const savedImages = ensureImagesForStorybookCharacter(
+                  character,
+                  [image],
+                  description,
+                  (addedCount, updatedCount) =>
+                    addedCount > 0
+                      ? `Saved generated image for ${character.name}.`
+                      : updatedCount > 0
+                        ? `Updated generated image for ${character.name}.`
+                        : `Generated image already saved for ${character.name}.`,
+                );
+                if (!savedImages?.length) {
+                  throw new Error(`Could not save the image for ${character.name}.`);
+                }
+                notifySystem('info', `Saved generated image in ${character.name}'s Phone Gallery.`);
+              }}
+              imageAssistantModelStateById={imageAssistantModelStateById}
+              onSetImageAssistantLlmModelLoaded={setImageAssistantLlmModelLoaded}
+              onUnloadImageAssistantComfyModel={unloadImageAssistantComfyModel}
+              onRefreshImageAssistantModelState={(providerId) => void refreshImageAssistantModelState(providerId)}
             />
           ) : (
             <EventsPanel

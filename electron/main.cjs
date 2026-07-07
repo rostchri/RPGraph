@@ -1036,6 +1036,10 @@ function lmStudioEndpoint(connection, route) {
   return `${lmStudioBaseUrl(connection)}/api/v1/${route}`;
 }
 
+function lmStudioV0Endpoint(connection, route) {
+  return `${lmStudioBaseUrl(connection)}/api/v0/${route}`;
+}
+
 function nativeProviderBaseUrl(connection, defaultBaseUrl) {
   const baseUrl = typeof connection?.baseUrl === 'string' && connection.baseUrl.trim()
     ? connection.baseUrl.trim()
@@ -1272,6 +1276,41 @@ function lmStudioLoadedInstanceIds(models, preferredModel) {
     })
     .map((model) => model.instance_id.trim());
   return [...new Set(loaded)];
+}
+
+function lmStudioEntryMatchesModel(entry, modelKey) {
+  return [
+    lmStudioModelKey(entry),
+    entry?.identifier,
+    entry?.identifier?.split?.(':')[0],
+    entry?.modelKey,
+    entry?.path,
+    entry?.instance_id,
+  ].some((value) => typeof value === 'string' && value.trim() === modelKey);
+}
+
+// Returns true/false when a source could report the loaded state, or null
+// when no source is available. The /api/v1 model list only catalogs
+// downloaded models, so loadedness comes from /api/v0 or the lms CLI.
+async function lmStudioModelLoadedState(connection, model, abort) {
+  try {
+    const result = await requestLmStudioV0Json(connection, 'models', {}, abort);
+    const entry = lmStudioModelEntries(result).find((candidate) =>
+      lmStudioEntryMatchesModel(candidate, model));
+    if (entry && typeof entry.state === 'string') {
+      return entry.state === 'loaded';
+    }
+  } catch {
+    // Fall through to the CLI check below.
+  }
+  try {
+    const { stdout } = await runLmStudioCli(['ps', '--json']);
+    const parsed = JSON.parse(stdout);
+    const entries = Array.isArray(parsed) ? parsed : lmStudioModelEntries(parsed);
+    return entries.some((entry) => lmStudioEntryMatchesModel(entry, model));
+  } catch {
+    return null;
+  }
 }
 
 function lmStudioCliName() {
@@ -1794,6 +1833,18 @@ async function readError(response) {
 
 async function requestLmStudioJson(connection, route, init, abort) {
   const response = await requestLlmResponse(lmStudioEndpoint(connection, route), {
+    ...init,
+    headers: requestHeaders(connection),
+  }, abort);
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+  const body = await response.text();
+  return body ? JSON.parse(body) : {};
+}
+
+async function requestLmStudioV0Json(connection, route, init, abort) {
+  const response = await requestLlmResponse(lmStudioV0Endpoint(connection, route), {
     ...init,
     headers: requestHeaders(connection),
   }, abort);
@@ -2348,40 +2399,40 @@ async function requestComfyJson(baseUrl, route, init, abort) {
   return body ? JSON.parse(body) : {};
 }
 
-// Voice generation keeps the ComfyUI voice model loaded so successive clips
-// (click-to-speak, preload, read-aloud) do not reload it every time. The
+// ComfyUI generation keeps models loaded so successive jobs do not reload them
+// every time. The
 // memory is freed lazily: right before the next local LLM request needs the
 // VRAM, plus a short settle delay so the memory is actually released before
 // the local LLM starts loading. The pending state is persisted because
 // ComfyUI keeps the model loaded across RPGraph restarts.
-let pendingComfyVoiceFreeBaseUrl = '';
-let pendingComfyVoiceFreeLoaded = false;
-const comfyVoiceFreeSettleMs = 1500;
+let pendingComfyFreeBaseUrl = '';
+let pendingComfyFreeLoaded = false;
+const comfyFreeSettleMs = 1500;
 
-function comfyVoiceStatePath() {
-  return path.join(app.getPath('userData'), 'comfy-voice-state.json');
+function comfyModelStatePath() {
+  return path.join(app.getPath('userData'), 'comfy-model-state.json');
 }
 
-async function pendingComfyVoiceFree() {
-  if (!pendingComfyVoiceFreeLoaded) {
-    pendingComfyVoiceFreeLoaded = true;
+async function pendingComfyFree() {
+  if (!pendingComfyFreeLoaded) {
+    pendingComfyFreeLoaded = true;
     try {
-      const parsed = JSON.parse(await fs.readFile(comfyVoiceStatePath(), 'utf8'));
-      if (!pendingComfyVoiceFreeBaseUrl && typeof parsed?.pendingFreeBaseUrl === 'string') {
-        pendingComfyVoiceFreeBaseUrl = parsed.pendingFreeBaseUrl;
+      const parsed = JSON.parse(await fs.readFile(comfyModelStatePath(), 'utf8'));
+      if (!pendingComfyFreeBaseUrl && typeof parsed?.pendingFreeBaseUrl === 'string') {
+        pendingComfyFreeBaseUrl = parsed.pendingFreeBaseUrl;
       }
     } catch {
       // First run or unreadable state file; nothing pending.
     }
   }
-  return pendingComfyVoiceFreeBaseUrl;
+  return pendingComfyFreeBaseUrl;
 }
 
-function setPendingComfyVoiceFree(baseUrl) {
-  pendingComfyVoiceFreeBaseUrl = typeof baseUrl === 'string' ? baseUrl : '';
-  pendingComfyVoiceFreeLoaded = true;
+function setPendingComfyFree(baseUrl) {
+  pendingComfyFreeBaseUrl = typeof baseUrl === 'string' ? baseUrl : '';
+  pendingComfyFreeLoaded = true;
   void fs
-    .writeFile(comfyVoiceStatePath(), JSON.stringify({ pendingFreeBaseUrl: pendingComfyVoiceFreeBaseUrl }))
+    .writeFile(comfyModelStatePath(), JSON.stringify({ pendingFreeBaseUrl: pendingComfyFreeBaseUrl }))
     .catch(() => {});
 }
 
@@ -2394,8 +2445,8 @@ function isLocalLlmBaseUrl(value) {
   }
 }
 
-async function freeComfyVoiceMemoryForLocalLlm(connection) {
-  const comfyBaseUrl = await pendingComfyVoiceFree();
+async function freeComfyMemoryForLocalLlm(connection) {
+  const comfyBaseUrl = await pendingComfyFree();
   const providerKind = typeof connection?.providerKind === 'string' ? connection.providerKind : '';
   const shouldFreeBeforeLlm =
     providerKind === 'lm-studio' ||
@@ -2413,8 +2464,8 @@ async function freeComfyVoiceMemoryForLocalLlm(connection) {
         free_memory: true,
       }),
     }, abort);
-    setPendingComfyVoiceFree('');
-    await new Promise((resolve) => setTimeout(resolve, comfyVoiceFreeSettleMs));
+    setPendingComfyFree('');
+    await new Promise((resolve) => setTimeout(resolve, comfyFreeSettleMs));
   } catch {
     // ComfyUI may already be gone; keep the pending marker so the next local
     // LLM request can try again if the voice model is still occupying VRAM.
@@ -2836,7 +2887,10 @@ ipcMain.handle('lmstudio:load-model', async (_event, request) => {
     if (!model) {
       throw new Error('Choose a model ID before loading an LM Studio model.');
     }
-    await freeComfyVoiceMemoryForLocalLlm(connection);
+    if (await lmStudioModelLoadedState(connection, model, abort) === true) {
+      return { loadedModel: model, method: 'already-loaded' };
+    }
+    await freeComfyMemoryForLocalLlm(connection);
     try {
       await requestLmStudioJson(connection, 'models/load', {
         method: 'POST',
@@ -2847,6 +2901,11 @@ ipcMain.handle('lmstudio:load-model', async (_event, request) => {
       if (abort.signal.aborted) {
         throw restError;
       }
+      // A load can fail because the model turns out to be loaded already
+      // (for example when the state probe above had no source to ask).
+      if (await lmStudioModelLoadedState(connection, model, abort) === true) {
+        return { loadedModel: model, method: 'already-loaded' };
+      }
       try {
         await runLmStudioCli(['load', model]);
         return { loadedModel: model, method: 'cli' };
@@ -2854,6 +2913,25 @@ ipcMain.handle('lmstudio:load-model', async (_event, request) => {
         throw restError;
       }
     }
+  } catch (error) {
+    if (abort.signal.aborted) {
+      return cancelledLlmIpcResult();
+    }
+    throw normalizeLlmError(error);
+  } finally {
+    abort.dispose();
+  }
+});
+
+ipcMain.handle('lmstudio:model-loaded', async (_event, request) => {
+  const connection = request?.connection ?? request;
+  const abort = createLlmAbortController(request);
+  try {
+    const model = typeof connection?.model === 'string' ? connection.model.trim() : '';
+    if (!model) {
+      return { loaded: false };
+    }
+    return { loaded: await lmStudioModelLoadedState(connection, model, abort) };
   } catch (error) {
     if (abort.signal.aborted) {
       return cancelledLlmIpcResult();
@@ -3245,7 +3323,7 @@ ipcMain.handle('ollama:load-model', async (_event, request) => {
     if (!model) {
       throw new Error('Choose a model ID before loading an Ollama model.');
     }
-    await freeComfyVoiceMemoryForLocalLlm(connection);
+    await freeComfyMemoryForLocalLlm(connection);
     await requestOllamaJson(connection, 'generate', {
       method: 'POST',
       body: JSON.stringify({
@@ -3255,6 +3333,31 @@ ipcMain.handle('ollama:load-model', async (_event, request) => {
       }),
     }, abort);
     return { loadedModel: model };
+  } catch (error) {
+    if (abort.signal.aborted) {
+      return cancelledLlmIpcResult();
+    }
+    throw normalizeLlmError(error);
+  } finally {
+    abort.dispose();
+  }
+});
+
+ipcMain.handle('ollama:model-loaded', async (_event, request) => {
+  const connection = request?.connection ?? request;
+  const abort = createLlmAbortController(request);
+  try {
+    const model = typeof connection?.model === 'string' ? connection.model.trim() : '';
+    if (!model) {
+      return { loaded: false };
+    }
+    const ps = await requestOllamaJson(connection, 'ps', {}, abort);
+    const normalized = (value) => value.replace(/:latest$/, '');
+    const target = normalized(model);
+    const loaded = Array.isArray(ps?.models) && ps.models.some((entry) =>
+      [entry?.name, entry?.model].some((value) =>
+        typeof value === 'string' && normalized(value.trim()) === target));
+    return { loaded };
   } catch (error) {
     if (abort.signal.aborted) {
       return cancelledLlmIpcResult();
@@ -3331,7 +3434,7 @@ ipcMain.handle('llm:chat-completion', async (_event, request) => {
   const startedAt = performance.now();
   const abort = createLlmAbortController(request);
   try {
-    await freeComfyVoiceMemoryForLocalLlm(request.connection);
+    await freeComfyMemoryForLocalLlm(request.connection);
     if (isGeminiProviderConnection(request.connection)) {
       const response = await requestLlmResponse(geminiApiUrl(request.connection, 'generateContent'), {
         method: 'POST',
@@ -3402,7 +3505,7 @@ ipcMain.handle('llm:chat-completion-stream', async (event, request) => {
   const startedAt = performance.now();
   const abort = createLlmAbortController(request);
   try {
-    await freeComfyVoiceMemoryForLocalLlm(request.connection);
+    await freeComfyMemoryForLocalLlm(request.connection);
     if (isGeminiProviderConnection(request.connection)) {
       const response = await requestLlmResponse(geminiApiUrl(request.connection, 'streamGenerateContent'), {
         method: 'POST',
@@ -3687,6 +3790,7 @@ ipcMain.handle('comfy:apply-workflow-repair', async (_event, request) => {
 ipcMain.handle('comfy:run-workflow-path', async (_event, request) => {
   const abort = createLlmAbortController(request);
   try {
+    setPendingComfyFree(typeof request?.baseUrl === 'string' ? request.baseUrl : '');
     const filePath = validateComfyWorkflowPath(request?.workflowPath || defaultComfyWorkflowPathForRole('image'));
     const contents = await fs.readFile(filePath, 'utf8');
     const parsedWorkflow = JSON.parse(contents);
@@ -3713,7 +3817,7 @@ ipcMain.handle('comfy:run-workflow-path', async (_event, request) => {
 ipcMain.handle('comfy:run-voice-workflow-path', async (_event, request) => {
   const abort = createLlmAbortController(request);
   try {
-    setPendingComfyVoiceFree(typeof request?.baseUrl === 'string' ? request.baseUrl : '');
+    setPendingComfyFree(typeof request?.baseUrl === 'string' ? request.baseUrl : '');
     const filePath = validateComfyWorkflowPath(
       request?.workflowPath || defaultComfyWorkflowPathForRole('voice'),
     );
@@ -3803,8 +3907,8 @@ ipcMain.handle('comfy:free-memory', async (_event, request) => {
     }, abort);
     // Only clear the lazy voice-unload marker when this request freed the
     // ComfyUI instance the voice model was loaded on.
-    if ((await pendingComfyVoiceFree()) === String(request?.baseUrl || '')) {
-      setPendingComfyVoiceFree('');
+    if ((await pendingComfyFree()) === String(request?.baseUrl || '')) {
+      setPendingComfyFree('');
     }
     return { ok: true };
   } catch (error) {

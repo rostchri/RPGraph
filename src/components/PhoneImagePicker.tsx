@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ChatImageAttachment } from '../types';
+import type { ChatImageAttachment, ConnectionPreset, ProviderConnectionHealth } from '../types';
+import type { StorybookCharacter } from '../storybook/runtime';
+import { ImageGenerationAssistantDialog } from './ImageGenerationAssistantDialog';
 import { useBackdropDismiss } from './useBackdropDismiss';
+import type {
+  ImageGenerationAssistantMessage,
+  ImageGenerationAssistantResult,
+  ImageGenerationSettings,
+  ImageAssistantModelState,
+} from '../chat/imageGenerationAssistant';
 
 const phoneGalleryPageSize = 100;
 
@@ -14,6 +22,42 @@ type PhoneImagePickerProps = {
   uploadDisabledReason?: string;
   onSelectImage: (image: ChatImageAttachment) => void;
   onUploadFromComputer: () => void;
+  connections?: ConnectionPreset[];
+  providerHealthById?: Record<string, ProviderConnectionHealth>;
+  availableCharacterLoras: string[];
+  characterContext: string;
+  characterCount: number;
+  chatHistoryContext: string;
+  estimatedTokenBytesPerToken: number;
+  saveCharacters: StorybookCharacter[];
+  preferredSaveCharacterId?: string;
+  imageAssistantModelStateById: Record<string, ImageAssistantModelState>;
+  onSetImageAssistantLlmModelLoaded: (providerId: string, loaded: boolean) => Promise<void>;
+  onUnloadImageAssistantComfyModel: (providerId: string) => Promise<void>;
+  onRefreshImageAssistantModelState: (providerId: string) => void;
+  onSubmitImageAssistantMessage: (request: {
+    connectionId: string;
+    imageProviderId: string;
+    currentPrompt: string;
+    currentSettings: ImageGenerationSettings;
+    currentImage?: { dataUrl: string; description: string };
+    availableCharacterLoras: string[];
+    characterContext: string;
+    chatHistoryContext: string;
+    messages: ImageGenerationAssistantMessage[];
+    userMessage: string;
+    describeImage?: boolean;
+  }) => Promise<ImageGenerationAssistantResult>;
+  onGenerateImageAssistantImages: (request: {
+    providerId: string;
+    prompt: string;
+    settings: ImageGenerationSettings;
+  }) => Promise<string[]>;
+  onSaveImageAssistantImage: (request: {
+    characterId: string;
+    dataUrl: string;
+    description: string;
+  }) => Promise<void>;
 };
 
 export function PhoneImagePicker({
@@ -25,9 +69,26 @@ export function PhoneImagePicker({
   uploadDisabledReason,
   onSelectImage,
   onUploadFromComputer,
+  connections = [],
+  providerHealthById = {},
+  availableCharacterLoras,
+  characterContext,
+  characterCount,
+  chatHistoryContext,
+  estimatedTokenBytesPerToken,
+  saveCharacters,
+  preferredSaveCharacterId,
+  imageAssistantModelStateById,
+  onSetImageAssistantLlmModelLoaded,
+  onUnloadImageAssistantComfyModel,
+  onRefreshImageAssistantModelState,
+  onSubmitImageAssistantMessage,
+  onGenerateImageAssistantImages,
+  onSaveImageAssistantImage,
 }: PhoneImagePickerProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [generationAssistantOpen, setGenerationAssistantOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ChatImageAttachment>();
   const [page, setPage] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -109,6 +170,27 @@ export function PhoneImagePicker({
               role="menuitem"
               onClick={() => {
                 setMenuOpen(false);
+                setGenerationAssistantOpen(true);
+              }}
+            >
+              <span aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.5 4l5.5 5.5" />
+                  <path d="M3 21l3.5-1 12-12a2.1 2.1 0 0 0-3-3l-12 12L3 21z" />
+                  <path d="M12 3h-2" />
+                  <path d="M4 9V7" />
+                </svg>
+              </span>
+              <span>
+                <strong>Take a Picture</strong>
+                <small>Create an image with the assistant</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
                 setGalleryOpen(true);
               }}
             >
@@ -153,6 +235,28 @@ export function PhoneImagePicker({
           </div>
         )}
       </div>
+
+      {generationAssistantOpen && (
+        <ImageGenerationAssistantDialog
+          connections={connections}
+          providerHealthById={providerHealthById}
+          availableCharacterLoras={availableCharacterLoras}
+          characterContext={characterContext}
+          characterCount={characterCount}
+          chatHistoryContext={chatHistoryContext}
+          estimatedTokenBytesPerToken={estimatedTokenBytesPerToken}
+          saveCharacters={saveCharacters.map((character) => ({ id: character.id, name: character.name }))}
+          preferredSaveCharacterId={preferredSaveCharacterId}
+          modelStateById={imageAssistantModelStateById}
+          onSetLlmModelLoaded={onSetImageAssistantLlmModelLoaded}
+          onUnloadComfyModel={onUnloadImageAssistantComfyModel}
+          onRefreshModelState={onRefreshImageAssistantModelState}
+          onSubmitAssistantMessage={onSubmitImageAssistantMessage}
+          onGenerateImages={onGenerateImageAssistantImages}
+          onSaveImage={onSaveImageAssistantImage}
+          onClose={() => setGenerationAssistantOpen(false)}
+        />
+      )}
 
       {galleryOpen && createPortal(
         <div
