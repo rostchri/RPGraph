@@ -335,7 +335,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
     autoCalibrateTokenEstimate,
     setCalibratedTokenBytesPerToken,
     lastRunDebugRef,
-    translateText,
+    translateText: translateTextUncached,
     directInputText,
     analyzeDisplayedOutput,
     appendPhoneMessage,
@@ -390,6 +390,57 @@ export function useGraphRun(options: UseGraphRunOptions) {
     phoneReplyToOverride?: MessageRecord,
     structuredInput?: StructuredInputPayload,
   ) {
+    // W8: within-turn translation memo. A story whose embedded phone block sits
+    // at the end makes this turn translate the same text twice (streaming
+    // rpOutput + non-streaming textBefore) — without this cache that is two
+    // identical LLM calls per turn. Keyed by the output-determining inputs
+    // (connection|direction|targetLanguage|context|text). Streaming calls
+    // (onChunk) always run so the UI keeps streaming, but their result seeds the
+    // cache so a later identical non-streaming call is served for free. The Map
+    // is turn-scoped: it lives only for this runGraph invocation.
+    const turnTranslationCache = new Map<string, Promise<string>>();
+    const translateText: typeof translateTextUncached = (
+      text,
+      direction,
+      connectionId,
+      nodeId,
+      onChunk,
+      displayLanguageOverride,
+      signal,
+      recentHistoryContext,
+      label,
+    ) => {
+      if (!text.trim()) {
+        return translateTextUncached(
+          text, direction, connectionId, nodeId, onChunk,
+          displayLanguageOverride, signal, recentHistoryContext, label,
+        );
+      }
+      const language = (displayLanguageOverride ?? displayLanguage).trim() || 'German';
+      const key = JSON.stringify([connectionId, direction, language, recentHistoryContext ?? '', text]);
+      if (onChunk) {
+        // Must stream to the UI — never serve a cache hit here, but remember the
+        // result so a later identical non-streaming call reuses it.
+        const pending = translateTextUncached(
+          text, direction, connectionId, nodeId, onChunk,
+          displayLanguageOverride, signal, recentHistoryContext, label,
+        );
+        if (!turnTranslationCache.has(key)) {
+          turnTranslationCache.set(key, pending);
+        }
+        return pending;
+      }
+      const cached = turnTranslationCache.get(key);
+      if (cached) {
+        return cached;
+      }
+      const pending = translateTextUncached(
+        text, direction, connectionId, nodeId, undefined,
+        displayLanguageOverride, signal, recentHistoryContext, label,
+      );
+      turnTranslationCache.set(key, pending);
+      return pending;
+    };
     const isAutoTurn = turnMode === 'auto-turn';
     const isNarratorTurn = turnMode === 'narrator';
     const shouldRestoreCancelledInput = !isAutoTurn && !narratorAutoTurn;
