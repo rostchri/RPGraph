@@ -798,6 +798,8 @@ function App() {
     setRpWeekdayLanguage,
     showReferenceImagesInContext,
     setShowReferenceImagesInContext,
+    labelReferenceImages,
+    setLabelReferenceImages,
     referenceImageTurnLookback,
     setReferenceImageTurnLookback,
     maxReferenceImages,
@@ -868,8 +870,9 @@ function App() {
       enabled: showReferenceImagesInContext && imageUploadVisionEnabled,
       turnLookback: referenceImageTurnLookback,
       maxImages: maxReferenceImages,
+      labelImages: labelReferenceImages,
     }),
-    [imageUploadVisionEnabled, showReferenceImagesInContext, referenceImageTurnLookback, maxReferenceImages],
+    [imageUploadVisionEnabled, showReferenceImagesInContext, labelReferenceImages, referenceImageTurnLookback, maxReferenceImages],
   );
   const settingsValueDefinitions = useMemo<SettingsValueDefinition[]>(() => {
     const definitions = new Map<string, SettingsValueDefinition>(
@@ -6426,6 +6429,7 @@ function App() {
         rpDateTimeFormat={rpDateTimeFormat}
         rpWeekdayLanguage={rpWeekdayLanguage}
         showReferenceImagesInContext={showReferenceImagesInContext}
+        labelReferenceImages={labelReferenceImages}
         referenceImageTurnLookback={referenceImageTurnLookback}
         maxReferenceImages={maxReferenceImages}
         glassDesignEnabled={glassDesignEnabled}
@@ -6453,6 +6457,7 @@ function App() {
         onRpDateTimeFormatChange={setRpDateTimeFormat}
         onRpWeekdayLanguageChange={setRpWeekdayLanguage}
         onShowReferenceImagesInContextChange={setShowReferenceImagesInContext}
+        onLabelReferenceImagesChange={setLabelReferenceImages}
         onReferenceImageTurnLookbackChange={setReferenceImageTurnLookback}
         onMaxReferenceImagesChange={setMaxReferenceImages}
         onGlassDesignEnabledChange={setGlassDesignEnabled}

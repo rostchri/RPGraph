@@ -143,6 +143,7 @@ type StudioDialogsProps = {
   rpDateTimeFormat: RpDateTimeFormat;
   rpWeekdayLanguage: RpWeekdayLanguage;
   showReferenceImagesInContext: boolean;
+  labelReferenceImages: boolean;
   referenceImageTurnLookback: number;
   maxReferenceImages: number;
   glassDesignEnabled: boolean;
@@ -170,6 +171,7 @@ type StudioDialogsProps = {
   onRpDateTimeFormatChange: (format: RpDateTimeFormat) => void;
   onRpWeekdayLanguageChange: (language: RpWeekdayLanguage) => void;
   onShowReferenceImagesInContextChange: (enabled: boolean) => void;
+  onLabelReferenceImagesChange: (enabled: boolean) => void;
   onReferenceImageTurnLookbackChange: (value: number) => void;
   onMaxReferenceImagesChange: (value: number) => void;
   onGlassDesignEnabledChange: (enabled: boolean) => void;
@@ -767,6 +769,7 @@ export function StudioDialogs({
   rpDateTimeFormat,
   rpWeekdayLanguage,
   showReferenceImagesInContext,
+  labelReferenceImages,
   referenceImageTurnLookback,
   maxReferenceImages,
   glassDesignEnabled,
@@ -794,6 +797,7 @@ export function StudioDialogs({
   onRpDateTimeFormatChange,
   onRpWeekdayLanguageChange,
   onShowReferenceImagesInContextChange,
+  onLabelReferenceImagesChange,
   onReferenceImageTurnLookbackChange,
   onMaxReferenceImagesChange,
   onGlassDesignEnabledChange,
@@ -2128,6 +2132,15 @@ export function StudioDialogs({
                           onChange={(event) => onShowReferenceImagesInContextChange(event.target.checked)}
                         />
                         <span>Send reference images to LLM</span>
+                      </label>
+                      <label className="option-toggle">
+                        <input
+                          type="checkbox"
+                          checked={labelReferenceImages}
+                          disabled={!showReferenceImagesInContext}
+                          onChange={(event) => onLabelReferenceImagesChange(event.target.checked)}
+                        />
+                        <span>Label images with name/caption for the model</span>
                       </label>
                       <label className="option-field" htmlFor="reference-image-turn-lookback">
                         REFERENCE IMAGE TURN LOOKBACK

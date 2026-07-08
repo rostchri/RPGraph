@@ -769,6 +769,7 @@ export type AppSettings = {
     rpDateTimeFormat?: RpDateTimeFormat;
     rpWeekdayLanguage?: RpWeekdayLanguage;
     showReferenceImagesInContext?: boolean;
+    labelReferenceImages?: boolean;
     referenceImageTurnLookback?: number;
     maxReferenceImages?: number;
     glassDesignEnabled?: boolean;

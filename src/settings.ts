@@ -33,6 +33,7 @@ export const defaultThoughtTextStyle = 'italic';
 const defaultRpDateTimeFormat: RpDateTimeFormat = 'eu';
 const defaultRpWeekdayLanguage: RpWeekdayLanguage = 'system';
 const defaultShowReferenceImagesInContext = true;
+const defaultLabelReferenceImages = true;
 const defaultReferenceImageTurnLookback = 20;
 const defaultMaxReferenceImages = 3;
 const rpWeekdayLanguages = [
@@ -682,6 +683,8 @@ function isAppSettings(value: unknown): value is AppSettings {
       [...rpWeekdayLanguages, 'de', 'en'].includes(settings.options.rpWeekdayLanguage)) &&
     (settings.options.showReferenceImagesInContext === undefined ||
       typeof settings.options.showReferenceImagesInContext === 'boolean') &&
+    (settings.options.labelReferenceImages === undefined ||
+      typeof settings.options.labelReferenceImages === 'boolean') &&
     (settings.options.referenceImageTurnLookback === undefined ||
       (typeof settings.options.referenceImageTurnLookback === 'number' &&
         Number.isFinite(settings.options.referenceImageTurnLookback) &&
@@ -757,6 +760,8 @@ type AppSettingsState = {
   setRpWeekdayLanguage: Dispatch<SetStateAction<RpWeekdayLanguage>>;
   showReferenceImagesInContext: boolean;
   setShowReferenceImagesInContext: Dispatch<SetStateAction<boolean>>;
+  labelReferenceImages: boolean;
+  setLabelReferenceImages: Dispatch<SetStateAction<boolean>>;
   referenceImageTurnLookback: number;
   setReferenceImageTurnLookback: Dispatch<SetStateAction<number>>;
   maxReferenceImages: number;
@@ -819,6 +824,9 @@ export function useAppSettings(): AppSettingsState {
   );
   const [showReferenceImagesInContext, setShowReferenceImagesInContext] = useState(
     defaultShowReferenceImagesInContext,
+  );
+  const [labelReferenceImages, setLabelReferenceImages] = useState(
+    defaultLabelReferenceImages,
   );
   const [referenceImageTurnLookback, setReferenceImageTurnLookback] = useState(
     defaultReferenceImageTurnLookback,
@@ -905,6 +913,9 @@ export function useAppSettings(): AppSettingsState {
         setShowReferenceImagesInContext(
           result.settings.options.showReferenceImagesInContext ?? defaultShowReferenceImagesInContext,
         );
+        setLabelReferenceImages(
+          result.settings.options.labelReferenceImages ?? defaultLabelReferenceImages,
+        );
         setReferenceImageTurnLookback(
           validReferenceImageTurnLookback(result.settings.options.referenceImageTurnLookback),
         );
@@ -978,6 +989,7 @@ export function useAppSettings(): AppSettingsState {
         rpDateTimeFormat: validRpDateTimeFormat(rpDateTimeFormat),
         rpWeekdayLanguage: validRpWeekdayLanguage(rpWeekdayLanguage),
         showReferenceImagesInContext,
+        labelReferenceImages,
         referenceImageTurnLookback: validReferenceImageTurnLookback(referenceImageTurnLookback),
         maxReferenceImages: validMaxReferenceImages(maxReferenceImages),
         glassDesignEnabled,
@@ -1030,6 +1042,7 @@ export function useAppSettings(): AppSettingsState {
     rpDateTimeFormat,
     rpWeekdayLanguage,
     showReferenceImagesInContext,
+    labelReferenceImages,
     referenceImageTurnLookback,
     maxReferenceImages,
     glassDesignEnabled,
@@ -1086,6 +1099,8 @@ export function useAppSettings(): AppSettingsState {
     setRpWeekdayLanguage,
     showReferenceImagesInContext,
     setShowReferenceImagesInContext,
+    labelReferenceImages,
+    setLabelReferenceImages,
     referenceImageTurnLookback,
     setReferenceImageTurnLookback,
     maxReferenceImages,

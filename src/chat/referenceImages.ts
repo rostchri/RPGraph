@@ -6,6 +6,11 @@ export type ReferenceImageOptions = {
   turnLookback: number;
   maxImages: number;
   additionalImageIds?: string[];
+  // W9: when true (the default), reference images sent to a vision-capable model
+  // are also announced in the prompt text — a compact label per image (name /
+  // caption) plus a one-line purpose preamble — so the model knows who/what the
+  // images are and treats them as appearance references, not new in-scene events.
+  labelImages?: boolean;
 };
 
 export type ReferenceImage = {

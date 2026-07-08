@@ -351,11 +351,26 @@ export async function runActionAwarePrompt({
       inputImagesForPass,
       imagePass.inputImageOffset,
     );
-    const textInputForPass = promptWithReferenceImageMarkers(
-      textInputWithInputImageMarkers,
-      usableReferenceImages,
-      imagePass.referenceImageOffset,
-    );
+    // W9: label reference images for the model unless the user turned it off.
+    // Default on. When on, inject the per-image markers AND a one-line purpose
+    // preamble so a vision model knows the attached images are appearance
+    // references, not new in-scene events. When off, send images without any
+    // accompanying text (previous vision behaviour).
+    const labelReferenceImagesEnabled = context.referenceImages?.labelImages !== false;
+    let textInputForPass = labelReferenceImagesEnabled
+      ? promptWithReferenceImageMarkers(
+          textInputWithInputImageMarkers,
+          usableReferenceImages,
+          imagePass.referenceImageOffset,
+        )
+      : textInputWithInputImageMarkers;
+    if (labelReferenceImagesEnabled && usableReferenceImages.length > 0) {
+      const count = usableReferenceImages.length;
+      const preamble = count === 1
+        ? '[The attached input image is a visual reference for consistent depiction; treat it as reference guidance, not a new in-scene event.]'
+        : `[The ${count} attached input images are visual references for consistent depiction; treat them as reference guidance, not new in-scene events.]`;
+      textInputForPass = `${textInputForPass}\n\n${preamble}`;
+    }
     const promptForPass = buildCombinedPrompt(textInputForPass);
     promptPasses.push({
       label: passLabel,
