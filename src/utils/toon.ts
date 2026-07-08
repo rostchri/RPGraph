@@ -9,7 +9,12 @@ export function stripStructuredResponse(text: string) {
 
 export function parseToonObject(text: string) {
   const stripped = stripStructuredResponse(text);
-  const emptyArrayObject = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)\[\]\{\}$/);
+  // A declared-empty TOON array header is an empty array — whether the length is
+  // omitted (`name[]{}`) or explicitly zero with declared fields and an optional
+  // header colon (`dialogue[0]{quoteId,speakerId}:`). The underlying decoder
+  // throws on the length-0 header form, so recognise it up front and return the
+  // empty array instead of letting the whole parse fail.
+  const emptyArrayObject = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)\[0?\]\{[^}]*\}:?\s*$/);
   if (emptyArrayObject) {
     return { [emptyArrayObject[1]]: [] };
   }
