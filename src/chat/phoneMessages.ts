@@ -318,10 +318,31 @@ export function parsePhoneMessageOutput(
   }
   try {
     const metadata = JSON.parse(text) as unknown;
-    return parsePhoneReplyRecord(metadata) ?? null;
+    const record = parsePhoneReplyRecord(metadata);
+    if (record) {
+      return record;
+    }
   } catch {
-    return null;
+    // fall through to the tolerant scan below
   }
+  // A reasoning model may prepend narration before the single JSON object
+  // (despite the "exactly one JSON object and nothing else" instruction).
+  // Recover by scanning for balanced-brace JSON objects and returning the
+  // last one that validates as a phone reply.
+  const ranges = jsonObjectRanges(text);
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    try {
+      const record = parsePhoneReplyRecord(
+        JSON.parse(text.slice(ranges[index].start, ranges[index].end)) as unknown,
+      );
+      if (record) {
+        return record;
+      }
+    } catch {
+      // try the previous object
+    }
+  }
+  return null;
 }
 
 function scanJsonObjects(text: string) {

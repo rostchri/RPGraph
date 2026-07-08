@@ -483,6 +483,37 @@ export function parseOutputActions(value: string): ParsedOutputActions {
       sequence.forEach((entry) => parseOutputActionsRoot(entry, result));
       return result;
     }
+    // A reasoning model may prepend narration before the JSON (despite the
+    // output-format instruction). Recover any balanced-brace JSON range that
+    // actually looks like an actions payload — validated keys only, so prose
+    // that merely contains braces cannot produce false positives.
+    const ranges = topLevelJsonRanges(text);
+    let recovered = 0;
+    for (const range of ranges) {
+      let parsedRange: unknown;
+      try {
+        parsedRange = JSON.parse(text.slice(range.start, range.end)) as unknown;
+      } catch {
+        continue;
+      }
+      const looksLikeActions =
+        Array.isArray(parsedRange) ||
+        (isRecord(parsedRange) &&
+          (Array.isArray(parsedRange.actions) ||
+            Array.isArray(parsedRange.phoneMessages) ||
+            Array.isArray(parsedRange.chatMessages) ||
+            Array.isArray(parsedRange.choices) ||
+            Array.isArray(parsedRange.infoBoxes) ||
+            Array.isArray(parsedRange.progressBars) ||
+            Array.isArray(parsedRange.contextCapacityBars)));
+      if (looksLikeActions) {
+        parseOutputActionsRoot(parsedRange, result);
+        recovered += 1;
+      }
+    }
+    if (recovered > 0) {
+      return result;
+    }
     return {
       ...result,
       warnings: ['RP Output Actions could not be parsed as JSON.'],
