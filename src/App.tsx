@@ -1845,6 +1845,14 @@ function App() {
   }, [activeTokenEstimateBytesPerToken, setNodes]);
 
   useEffect(() => {
+    // Streaming updates the live output message repeatedly. Rebuilding all
+    // history strings for every partial chunk creates extreme allocation
+    // pressure, especially when messages contain base64 image data. The graph
+    // run receives its history directly; node previews only need the completed
+    // message once the run has finished.
+    if (isRunning) {
+      return;
+    }
     const rawHistory = JSON.stringify(messages, null, 2);
     const originalHistory = formatChatHistory(
       messages,
@@ -1923,7 +1931,7 @@ function App() {
           : node,
       ),
     );
-  }, [messages, rpDateTimeFormat, rpWeekdayLanguage, setNodes]);
+  }, [isRunning, messages, rpDateTimeFormat, rpWeekdayLanguage, setNodes]);
 
   useEffect(() => {
     if (settingsLoadComplete) {
