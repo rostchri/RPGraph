@@ -3277,7 +3277,12 @@ ipcMain.handle('gemini:generate-speech', async (event, request) => {
   if (!input) {
     throw new Error('Enter text to speak first.');
   }
-  const stream = connection.ttsStreamAudio === true && request?.requestId;
+  // Gemini's non-streaming generateContent truncates long TTS audio, while the
+  // streaming streamGenerateContent method returns the complete clip. Always use
+  // the streaming method and reassemble the audio server-side so a long narration
+  // is never cut off - even when live playback is disabled. Progressive per-chunk
+  // delivery to the renderer still only happens when a requestId is present.
+  const pushChunks = Boolean(request?.requestId);
   const body = {
     contents: [{ parts: [{ text: input }] }],
     generationConfig: {
@@ -3294,7 +3299,7 @@ ipcMain.handle('gemini:generate-speech', async (event, request) => {
   };
   try {
     const response = await requestLlmResponse(
-      geminiApiUrl(connection, stream ? 'streamGenerateContent' : 'generateContent'),
+      geminiApiUrl(connection, 'streamGenerateContent'),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3319,44 +3324,40 @@ ipcMain.handle('gemini:generate-speech', async (event, request) => {
         }
         const bytes = Buffer.from(base64, 'base64');
         pcmChunks.push(bytes);
-        if (stream && !event.sender.isDestroyed()) {
+        if (pushChunks && !event.sender.isDestroyed()) {
           event.sender.send(`gemini:speech-chunk:${request.requestId}`, base64);
         }
       }
     };
 
-    if (stream) {
-      if (!response.body) {
-        throw new Error('The Gemini speech stream does not contain a body.');
-      }
-      const decoder = new TextDecoder();
-      let buffered = '';
-      const consumeLine = (line) => {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) {
-          return;
-        }
-        const data = trimmed.slice(5).trim();
-        if (!data || data === '[DONE]') {
-          return;
-        }
-        try {
-          consumeResponse(JSON.parse(data));
-        } catch {
-          // Ignore incomplete or non-JSON SSE lines.
-        }
-      };
-      for await (const value of response.body) {
-        buffered += decoder.decode(streamChunkBytes(value), { stream: true });
-        const lines = buffered.split(/\r?\n/);
-        buffered = lines.pop() ?? '';
-        lines.forEach(consumeLine);
-      }
-      buffered += decoder.decode();
-      buffered.split(/\r?\n/).forEach(consumeLine);
-    } else {
-      consumeResponse(await response.json());
+    if (!response.body) {
+      throw new Error('The Gemini speech stream does not contain a body.');
     }
+    const decoder = new TextDecoder();
+    let buffered = '';
+    const consumeLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) {
+        return;
+      }
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') {
+        return;
+      }
+      try {
+        consumeResponse(JSON.parse(data));
+      } catch {
+        // Ignore incomplete or non-JSON SSE lines.
+      }
+    };
+    for await (const value of response.body) {
+      buffered += decoder.decode(streamChunkBytes(value), { stream: true });
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() ?? '';
+      lines.forEach(consumeLine);
+    }
+    buffered += decoder.decode();
+    buffered.split(/\r?\n/).forEach(consumeLine);
 
     const pcm = Buffer.concat(pcmChunks);
     if (pcm.length === 0) {
