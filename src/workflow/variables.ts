@@ -218,8 +218,6 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const escapedWorkflowVariableSentinel = '\uE000RPGRAPH_ESCAPED_WORKFLOW_VARIABLE_';
-
 function workflowVariablePattern(alias: string, escaped = true) {
   return `${escaped ? '(?<!\\\\)' : ''}${escapeRegExp(workflowVariableOpen)}\\s*${escapeRegExp(alias)}\\s*${escapeRegExp(workflowVariableClose)}`;
 }
@@ -230,14 +228,31 @@ export function variableAliases(definition: Pick<SettingsValueDefinition, 'key' 
     .filter(Boolean);
 }
 
+// Cached `<alias>`-reference test regexes (case-insensitive) — the pattern
+// depends only on the alias, so it is compiled once per alias instead of on
+// every textReferencesWorkflowVariable call (which runs per node × definition).
+const referenceRegexCache = new Map<string, RegExp>();
+
+function referenceRegexForAlias(alias: string): RegExp {
+  let regex = referenceRegexCache.get(alias);
+  if (!regex) {
+    regex = new RegExp(workflowVariablePattern(alias), 'i');
+    referenceRegexCache.set(alias, regex);
+  }
+  return regex;
+}
+
 export function textReferencesWorkflowVariable(
   text: string,
   definition: Pick<SettingsValueDefinition, 'key' | 'label'>,
 ) {
-  return variableAliases(definition).some((alias) =>
-    new RegExp(workflowVariablePattern(alias), 'i')
-      .test(text),
-  );
+  // Fast path: without an opening delimiter the text cannot reference any
+  // variable. Most checked fields are plain numbers/empty, so this skips regex
+  // work entirely on the hot per-node/per-definition path.
+  if (!text.includes(workflowVariableOpen)) {
+    return false;
+  }
+  return variableAliases(definition).some((alias) => referenceRegexForAlias(alias).test(text));
 }
 
 export function textSetsWorkflowVariable(
@@ -252,40 +267,65 @@ export function textSetsWorkflowVariable(
   );
 }
 
+// One compiled regex per distinct alias set \u2014 the pattern depends only on the
+// variable names, not their values, so it is cached across calls. This collapses
+// the former per-alias `new RegExp(...)` + full-text `.replace` loop (O(aliases)
+// scans of the whole prompt, recompiled every call) into a single cached pass.
+const combinedVariableRegexCache = new Map<string, RegExp>();
+
+function combinedWorkflowVariableRegex(aliases: string[]): RegExp {
+  // Longest alias first so a shorter alias cannot shadow a longer one it prefixes.
+  const ordered = [...aliases].sort((a, b) => b.length - a.length);
+  const signature = ordered.join('\uE001');
+  let regex = combinedVariableRegexCache.get(signature);
+  if (!regex) {
+    const alternation = ordered.map(escapeRegExp).join('|');
+    // (\\?)      \u2014 optional escaping backslash: `\<Name>` stays literal (minus the
+    //              backslash), mirroring the old protect/restore of escaped tokens.
+    // <\s* \u2026 \s*> \u2014 the placeholder with tolerant surrounding whitespace.
+    regex = new RegExp(
+      `(\\\\?)${escapeRegExp(workflowVariableOpen)}\\s*(${alternation})\\s*${escapeRegExp(workflowVariableClose)}`,
+      'gi',
+    );
+    combinedVariableRegexCache.set(signature, regex);
+  }
+  return regex;
+}
+
 export function resolveWorkflowVariables(
   text: string,
   definitions: Pick<SettingsValueDefinition, 'key' | 'label'>[],
   values: WorkflowVariableValues,
 ) {
-  const escapedTokens: string[] = [];
-  const withEscapedTokensProtected = definitions.reduce((protectedText, definition) =>
-    variableAliases(definition).reduce(
-      (currentText, alias) =>
-        currentText.replace(
-          new RegExp(`\\\\${workflowVariablePattern(alias, false)}`, 'gi'),
-          (token) => {
-            const index = escapedTokens.length;
-            escapedTokens.push(token.slice(1));
-            return `${escapedWorkflowVariableSentinel}${index}\uE001`;
-          },
-        ),
-      protectedText,
-    ), text);
-  const resolved = definitions.reduce((resolvedText, definition) => {
+  // Fast path: with no opening delimiter there is nothing to substitute or
+  // unescape \u2014 skip building the value map and running any regex entirely.
+  if (!text.includes(workflowVariableOpen)) {
+    return text;
+  }
+  // Map each alias (label + key of every definition) to its value. First alias
+  // wins on collision, preserving the old per-definition sequential replace order.
+  const valueByAlias = new Map<string, string>();
+  const aliases: string[] = [];
+  for (const definition of definitions) {
     const value = values[definition.key] ?? defaultWorkflowVariableValue(definition.key);
-    return variableAliases(definition).reduce(
-      (currentText, alias) =>
-        currentText.replace(
-          new RegExp(workflowVariablePattern(alias), 'gi'),
-          value,
-        ),
-      resolvedText,
-    );
-  }, withEscapedTokensProtected);
-  return escapedTokens.reduce(
-    (currentText, token, index) =>
-      currentText.replace(`${escapedWorkflowVariableSentinel}${index}\uE001`, token),
-    resolved,
+    for (const alias of variableAliases(definition)) {
+      const key = alias.toLocaleLowerCase();
+      if (!valueByAlias.has(key)) {
+        valueByAlias.set(key, value);
+        aliases.push(alias);
+      }
+    }
+  }
+  if (aliases.length === 0) {
+    return text;
+  }
+  // Single pass: substitute unescaped `<Name>` with its value; keep an escaped
+  // `\<Name>` literal (minus the escape). Values are inserted literally (not
+  // re-scanned), so a value cannot inject another placeholder.
+  return text.replace(
+    combinedWorkflowVariableRegex(aliases),
+    (match: string, backslash: string, alias: string) =>
+      backslash ? match.slice(1) : valueByAlias.get(alias.trim().toLocaleLowerCase()) ?? match,
   );
 }
 
