@@ -69,13 +69,15 @@ export function translationPrompt({
   return [
     instruction,
     'Preserve tone, meaning, names, formatting, and roleplay style.',
+    'Quotation marks inside the text mark spoken dialogue and are essential: keep every quoted passage quoted in the translation, and keep unquoted narration unquoted.',
+    'If a passage is clearly spoken dialogue but the user forgot the quotation marks, add them around the spoken words in the translation.',
     recentHistoryContext?.trim()
       ? [
           'Use this recent roleplay context only to resolve names, pronouns, tone, references, and wording:',
           recentHistoryContext.trim(),
         ].join('\n')
       : '',
-    'Return only the translated text, without notes or quotation marks. When instructed to return an empty response, output no characters.',
+    'Return only the translated text. Do not add notes, and do not wrap the whole output in quotation marks that are not part of the text. When instructed to return an empty response, output no characters.',
     '',
     text,
   ].filter(Boolean).join('\n');
@@ -113,7 +115,8 @@ export function directInputPrompt({
     channelInstruction,
     `The user's display language is ${language}; the direction may be ${language}, English, or mixed-language.`,
     'Use recent roleplay context to infer references, relationships, mood, and continuity.',
-    'Return only the resulting English input, without notes or quotation marks.',
+    'Wrap spoken dialogue in quotation marks; leave narration and actions unquoted.',
+    'Return only the resulting English input. Do not add notes, and do not wrap the whole output in quotation marks.',
     recentHistoryContext?.trim()
       ? [
           '',
