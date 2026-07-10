@@ -32,7 +32,7 @@ Workflow variables:
 - Escape a variable token with a backslash when a prompt should show the token itself to the LLM: `\<Current Location>` is sent as literal `<Current Location>`.
 
 Core node map:
-- User Input: singleton input node for the current user message. Outputs text, image, message format, and turn mode. Message format is 0 for RP chat and 1 for phone. Turn mode is 0 for normal input with images, 1 for normal input without images, 2 for AutoTurn, and 3 for events.
+- User Input: singleton input node for the current user message. Outputs text, image, message format, turn mode, and Direct Actions. Message format is 0 for RP chat and 1 for phone. Turn mode is 0 for normal input with images, 1 for normal input without images, 2 for AutoTurn, and 3 for events. Direct Actions carries app-action JSON without evaluating the other outputs during a direct-only run.
 - Last User Input: exposes the latest user message as text, optionally with RP date/time.
 - Last RP Output: exposes the latest generated roleplay output as text, optionally with RP date/time.
 - Chat History: singleton context node for previous user/RP turns. Outputs formatted history and last N turns. Can also update RP time tracking after output.
@@ -54,7 +54,7 @@ Core node map:
 - Fixed Bool: outputs a boolean workflow parameter for routing.
 - Workflow Variable: outputs centrally configured option values and supports `<Variable Name>` replacements in prompts and supported number fields.
 - RP Storybook V1: singleton story data node. Stores complete storybook JSON and formatted text, and outputs JSON, formatted storybook text, and character info.
-- RP Output: singleton final output node. Receives normal RP text, phone-message text, scene context, and optional highlighting context, then produces the visible roleplay response. It applies and filters `@set` workflow-variable commands on all RP Output inputs.
+- RP Output: singleton final output node. Receives normal RP text, phone-message text, Output Actions, Social Media, Direct Actions, and optional highlighting context, then produces the visible roleplay response. Direct Actions accepts the same app-action JSON as Output Actions and runs after the normal channels when both are present. It applies and filters `@set` workflow-variable commands on all RP Output inputs.
 
 Assistant behavior:
 - The workflow assistant sees the app overview, compact workflow snapshot, recent system log warnings/errors, and the assistant chat history. It can request node context for exact code/settings/ports of one node, and debug snapshot sections for current app/run facts such as raw messages, turns, selected UI state, last run values, Prompt Switch data, Event Manager data, connections, and full log entries.

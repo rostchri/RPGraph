@@ -1,4 +1,80 @@
-export type OutputFormatHelpKind = 'rp' | 'phone' | 'output-actions' | 'social-media';
+export type OutputFormatHelpKind =
+  | 'rp'
+  | 'phone'
+  | 'output-actions'
+  | 'social-media'
+  | 'direct-actions'
+  | 'user-input'
+  | 'rp-output';
+
+export const userInputOverview = `USER INPUT OUTPUTS
+
+Text
+The current user, Narrator, AutoTurn, event, phone, or app input as text. This is the normal content sent through the story workflow.
+
+Image
+The current normalized input images. This output is empty when the turn has no attached image.
+
+Message Format
+Selects the broad LLM Prompt Switch route for normal graph runs:
+0 = Normal RP
+1 = Phone Message
+3 = Social Media
+
+Direct Actions does not use Message Format and does not select a Prompt Switch channel.
+
+Turn Mode
+Selects the prompt slot inside the chosen normal output channel:
+0 = Input with image
+1 = Input without image
+2 = AutoTurn
+3 = Event
+4 = Narrator
+5 = Narrator AutoTurn
+
+Social Media uses its own slots: 0 = Fotogram post, 1 = OnlyFriends post, 2 = Fotogram comment thread, 3 = OnlyFriends comment thread.
+
+Direct Actions
+Carries already-complete app-action JSON. A direct-only run evaluates only this output and the matching RP Output input. Text, Image, Message Format, Turn Mode, and the LLM Prompt Switch are not evaluated, so no LLM is called.
+
+Bank transfer example:
+{"bankTransfers":[{"from":"Mia","to":"Alex","amount":20,"note":"Dinner"}]}
+
+Info box example:
+{"infoBoxes":[{"title":"Purchase complete","text":"The item was added to the account.","tone":"success"}]}
+
+Direct actions are still recorded as a normal turn, so their changes can be undone or regenerated. The User Input Direct Actions output must be connected to the RP Output Direct Actions input for app-triggered direct runs.`;
+
+export const rpOutputOverview = `RP OUTPUT INPUTS
+
+Normal RP
+Visible story prose and dialogue for the Chat tab. It can also contain embedded phoneMessages, bankTransfers, or one displayImageId when the generated story requires them.
+
+Phone Message
+One generated phone reply as JSON with from, to, message, and optional isVoiceMessage or sendImageId. This channel can also carry a separate incoming-image caption action.
+
+Social Media
+Generated reactions for Fotogram and OnlyFriends posts or comment threads. The app applies the returned likes and comments and records the relevant history.
+
+Output Actions
+LLM-generated or graph-generated app commands that accompany a normal run. Supported commands include phone messages, chat messages, choice buttons, info boxes, progress bars, context-capacity bars, bank transfers, setTab, and setPlayer.
+
+Highlighting Context
+Optional extra context used only by RP Output speaker and dialogue highlighting analysis. It is not displayed as story text.
+
+Direct Actions
+Already-complete app-action JSON that does not need an LLM. It accepts the same command shapes as Output Actions. In a direct-only run, RPGraph starts here and does not evaluate the normal RP, phone, social, routing, translation, speaker-analysis, or preparation paths.
+
+Bank transfer example:
+{"bankTransfers":[{"from":"Mia","to":"Alex","amount":20,"note":"Dinner"}]}
+
+Phone message example:
+{"phoneMessages":[{"from":"Mia","to":"Alex","message":"I sent it."}]}
+
+Info box example:
+{"infoBoxes":[{"title":"Purchase complete","text":"The item was added to the account.","tone":"success"}]}
+
+When normal outputs and Direct Actions are both connected for one turn, the normal graph outputs are evaluated first and Direct Actions is evaluated last. Direct-only app actions remain full turns with normal validation, history, undo, and regeneration.`;
 
 export const rpOutputPrompt = `Normal RP is the main story output for the Chat tab.
 
@@ -124,6 +200,24 @@ export const outputFormatHelp = {
     description:
       'Use this prompt in the LLM Prompt Switch channel that reacts to social app activity (Fotogram, OnlyFriends). The JSON reactions are applied to the post in the app and recorded in the chat history.',
     prompt: socialMediaOutputPrompt,
+  },
+  'direct-actions': {
+    title: 'Direct Actions Format',
+    description:
+      'Direct Actions accepts the same app-action JSON as Output Actions, but runs after the normal outputs and can be used without calling an LLM.',
+    prompt: outputActionsPrompt,
+  },
+  'user-input': {
+    title: 'User Input Guide',
+    description:
+      'Current meaning of every User Input output, including prompt routing and the LLM-free Direct Actions path.',
+    prompt: userInputOverview,
+  },
+  'rp-output': {
+    title: 'RP Output Guide',
+    description:
+      'Current meaning of every RP Output input and the difference between normal generated output, Output Actions, and Direct Actions.',
+    prompt: rpOutputOverview,
   },
 } satisfies Record<OutputFormatHelpKind, {
   title: string;

@@ -199,7 +199,7 @@ export function OutputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
             className="node-info-button output-phone-info output-format-help-button nodrag"
             type="button"
             aria-label="Show RP text input format"
-            onClick={() => showOutputFormatHelp('rp')}
+            onClick={() => showOutputFormatHelp('rp-output')}
           >
             ?
           </button>
@@ -211,19 +211,7 @@ export function OutputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
             className="node-info-button output-phone-info output-format-help-button nodrag"
             type="button"
             aria-label="Show phone message format"
-            onClick={() => showOutputFormatHelp('phone')}
-          >
-            ?
-          </button>
-        </div>
-        <div className="workflow-port workflow-port-input output-format-port">
-          <Handle id="output-actions" type="target" position={Position.Left} />
-          <PortLabel data={data} direction="input" handle="output-actions" label="Output Actions" valueType="mixed" />
-          <button
-            className="node-info-button output-phone-info output-format-help-button nodrag"
-            type="button"
-            aria-label="Show output actions format"
-            onClick={() => showOutputFormatHelp('output-actions')}
+            onClick={() => showOutputFormatHelp('rp-output')}
           >
             ?
           </button>
@@ -235,7 +223,19 @@ export function OutputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
             className="node-info-button output-phone-info output-format-help-button nodrag"
             type="button"
             aria-label="Show social media format"
-            onClick={() => showOutputFormatHelp('social-media')}
+            onClick={() => showOutputFormatHelp('rp-output')}
+          >
+            ?
+          </button>
+        </div>
+        <div className="workflow-port workflow-port-input output-format-port">
+          <Handle id="output-actions" type="target" position={Position.Left} />
+          <PortLabel data={data} direction="input" handle="output-actions" label="Output Actions" valueType="mixed" />
+          <button
+            className="node-info-button output-phone-info output-format-help-button nodrag"
+            type="button"
+            aria-label="Show output actions format"
+            onClick={() => showOutputFormatHelp('rp-output')}
           >
             ?
           </button>
@@ -243,6 +243,26 @@ export function OutputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
         <div className="workflow-port workflow-port-input">
           <Handle id="highlighting-context" type="target" position={Position.Left} />
           <PortLabel data={data} direction="input" handle="highlighting-context" label="Highlighting Context" valueType="text" />
+          <button
+            className="node-info-button output-phone-info output-format-help-button nodrag"
+            type="button"
+            aria-label="Show RP Output guide"
+            onClick={() => showOutputFormatHelp('rp-output')}
+          >
+            ?
+          </button>
+        </div>
+        <div className="workflow-port workflow-port-input output-format-port">
+          <Handle id="direct-actions" type="target" position={Position.Left} />
+          <PortLabel data={data} direction="input" handle="direct-actions" label="Direct Actions" valueType="mixed" />
+          <button
+            className="node-info-button output-phone-info output-format-help-button nodrag"
+            type="button"
+            aria-label="Show direct actions format"
+            onClick={() => showOutputFormatHelp('rp-output')}
+          >
+            ?
+          </button>
         </div>
       </div>
       {showSpeakerPrompt && typeof document !== 'undefined' && createPortal(

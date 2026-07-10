@@ -293,7 +293,7 @@ export function useTurnRecordState({
     checkpointBeforeWorkflowVariables: Record<string, string>,
     replacement?: TurnReplacement,
     mode: TurnRecordMode = 'user',
-    metadata: Pick<TurnRecord, 'messageFormat' | 'promptSlot'> = {},
+    metadata: Pick<TurnRecord, 'messageFormat' | 'promptSlot' | 'directAction'> = {},
   ) {
     const collector = activeTurnCollectorRef.current;
     if (!collector) {
@@ -307,6 +307,7 @@ export function useTurnRecordState({
       mode,
       messageFormat: metadata.messageFormat,
       promptSlot: metadata.promptSlot,
+      directAction: metadata.directAction || undefined,
       input: {
         graphText: inputGraphText,
         messages: collector.inputMessages,

@@ -113,6 +113,9 @@ import {
 import { promptImagePass } from '../nodes/shared/promptImagePass';
 import { runActionAwarePrompt } from '../nodes/shared/promptRun';
 import { applyTurnCheckpointToNodes } from '../data-management/checkpointStore';
+import { executeGraph } from '../graph/executeGraph';
+import { NodeLlmApi } from '../llm/NodeLlmApi';
+import { TextMetricsApi } from '../llm/tokenMetrics';
 import {
   hydrateNodeData,
   persistentNodeData,
@@ -2701,29 +2704,29 @@ export function verifyWorkflowValidationFixtures() {
     throw new Error('Workflow validation fixture failed: default workflow has no input');
   }
   const identicalVersion = hydrateNodeData(
-    { ...inputData, nodeDataVersion: '1.6.0' },
-    versionHydrateContext,
-  );
-  assertFixture(
-    identicalVersion.kind === undefined && identicalVersion.nodeDataVersion === '1.6.0',
-    'an identical core node version must hydrate normally',
-  );
-  const patchVersion = hydrateNodeData(
-    { ...inputData, nodeDataVersion: '1.6.1' },
-    versionHydrateContext,
-  );
-  assertFixture(
-    patchVersion.kind === undefined && patchVersion.nodeDataVersion === '1.6.0',
-    'a patch-only core node difference must hydrate normally',
-  );
-  const minorVersion = hydrateNodeData(
     { ...inputData, nodeDataVersion: '1.7.0' },
     versionHydrateContext,
   );
   assertFixture(
+    identicalVersion.kind === undefined && identicalVersion.nodeDataVersion === '1.7.0',
+    'an identical core node version must hydrate normally',
+  );
+  const patchVersion = hydrateNodeData(
+    { ...inputData, nodeDataVersion: '1.7.1' },
+    versionHydrateContext,
+  );
+  assertFixture(
+    patchVersion.kind === undefined && patchVersion.nodeDataVersion === '1.7.0',
+    'a patch-only core node difference must hydrate normally',
+  );
+  const minorVersion = hydrateNodeData(
+    { ...inputData, nodeDataVersion: '1.8.0' },
+    versionHydrateContext,
+  );
+  assertFixture(
     minorVersion.kind === 'incompatible-core-node' &&
-      minorVersion.nodeDataVersion === '1.7.0' &&
-      minorVersion.currentNodeVersion === '1.6.0',
+      minorVersion.nodeDataVersion === '1.8.0' &&
+      minorVersion.currentNodeVersion === '1.7.0',
     'a minor core node difference must hydrate as an incompatible placeholder',
   );
   const majorVersion = hydrateNodeData(
@@ -2733,7 +2736,7 @@ export function verifyWorkflowValidationFixtures() {
   assertFixture(
     majorVersion.kind === 'incompatible-core-node' &&
       majorVersion.nodeDataVersion === '2.0.0' &&
-      majorVersion.currentNodeVersion === '1.6.0',
+      majorVersion.currentNodeVersion === '1.7.0',
     'a major core node difference must hydrate as an incompatible placeholder',
   );
 
@@ -2746,7 +2749,7 @@ export function verifyWorkflowValidationFixtures() {
   );
 
   const workflowWithIncompatibleNode = structuredClone(currentWorkflow);
-  workflowWithIncompatibleNode.nodes[0]!.data.nodeDataVersion = '1.7.0';
+  workflowWithIncompatibleNode.nodes[0]!.data.nodeDataVersion = '1.8.0';
   assertFixture(
     isWorkflowFile(workflowWithIncompatibleNode),
     'a workflow with an incompatible core node version must remain loadable',
@@ -3146,5 +3149,43 @@ async function verifyPromptRunFixtures() {
   );
 }
 
+async function verifyDirectActionsGraphFixture() {
+  const inputNode = currentWorkflow.nodes.find((node) => node.data.nodeType === 'input');
+  const outputNode = currentWorkflow.nodes.find((node) => node.data.nodeType === 'output');
+  if (!inputNode || !outputNode) {
+    throw new Error('Workflow validation fixture failed: default workflow has no chat endpoints');
+  }
+  const directJson = '{"bankTransfers":[{"from":"Espen Harper","to":"Ryan Parker","amount":20}]}';
+  let llmCalls = 0;
+  const result = await executeGraph({
+    outputNodeId: outputNode.id,
+    outputSourceHandle: 'direct-actions',
+    nodes: [inputNode, outputNode],
+    edges: [{
+      id: 'direct-actions-fixture',
+      source: inputNode.id,
+      sourceHandle: 'direct-actions',
+      target: outputNode.id,
+      targetHandle: 'direct-actions',
+    }],
+    originalInput: directJson,
+    originalHistory: '',
+    translatedHistory: '',
+    llm: new NodeLlmApi({
+      resolveConnection: async () => {
+        llmCalls += 1;
+        throw new Error('Direct Actions must not call an LLM.');
+      },
+    }),
+    textMetrics: new TextMetricsApi(4),
+    updateRuntimeNode: () => undefined,
+  });
+  assertFixture(
+    result === directJson && llmCalls === 0,
+    'a direct action must cross the graph without calling an LLM',
+  );
+}
+
 verifyWorkflowValidationFixtures();
 void verifyPromptRunFixtures();
+void verifyDirectActionsGraphFixture();

@@ -12,5 +12,8 @@ export async function executeInputNode(_node: unknown, context: ExecuteContext) 
       ? context.inputImages.map((image) => image.name).join('\n')
       : '';
   }
+  if (context.sourceHandle === 'direct-actions') {
+    return context.originalInput;
+  }
   return context.originalInput;
 }

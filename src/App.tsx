@@ -60,7 +60,7 @@ import {
 } from './chat/inputTransforms';
 import {
   bankingSeenStateFromMessages,
-  bankTransferInputText,
+  bankTransferActionJson,
   bankTransferMessages,
 } from './chat/bankTransfers';
 import { socialPostInputText, socialThreadActionInputText } from './chat/socialMedia';
@@ -4739,6 +4739,12 @@ function App() {
         false,
         turn.messageFormat,
         turn.promptSlot,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        turn.directAction,
       );
       return;
     }
@@ -5029,7 +5035,7 @@ function App() {
       return;
     }
     void runGraph(
-      bankTransferInputText({
+      bankTransferActionJson({
         from: request.from.name,
         to: request.to,
         amount: request.amount,
@@ -5050,6 +5056,12 @@ function App() {
       false,
       2,
       0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
     );
   }
 

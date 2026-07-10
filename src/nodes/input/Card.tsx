@@ -20,35 +20,6 @@ import {
   type PromptPresetSource,
 } from '../shared/promptPresets';
 
-const messageFormatHelpText = [
-  'Message Format',
-  '',
-  'Value | Meaning',
-  '0     | RP Chat',
-  '1     | Phone Message',
-  '2     | Output Actions',
-  '',
-  'RP Chat output may include embedded phoneMessages JSON for phone texts that happen inside a scene.',
-  'Phone Message output accepts direct phone JSON: from, to, message, optional sendImageId, and optional separate imageAction caption commands.',
-  'Output Actions output accepts app-action JSON such as buttons, info boxes, progress bars, setTab, setPlayer, chatMessage, and phoneMessage.',
-  'Output Actions UI commands only run when Message Format is 2. Phone-message JSON can be created from RP Chat, Phone Message, or Output Actions.',
-].join('\n');
-
-const turnModeHelpText = [
-  'Turn Mode',
-  '',
-  'Value | Meaning',
-  '0     | With Image',
-  '1     | No Image',
-  '2     | AutoTurn',
-  '3     | Event',
-  '4     | Narrator',
-  '5     | Narrator AutoTurn',
-  '',
-  'For Phone Message format, With Image means the latest incoming phone input has an attached image and the output can return an imageAction for that incoming image.',
-  'For Phone Message format, No Image can still send a stored image with sendImageId and can still update a stored image caption with a separate imageAction when recent history clearly establishes a new fact.',
-].join('\n');
-
 function AutoTurnPromptTextarea({
   value,
   disabled,
@@ -83,7 +54,7 @@ function AutoTurnPromptTextarea({
 
 export function InputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
   const nodeBodyRef = useNodeLayoutSync(id);
-  const { textPreview, updateData } = useNodeActions();
+  const { textPreview, updateData, showOutputFormatHelp } = useNodeActions();
   const view = useNodeView();
   const { estimatedTokenBytesPerToken } = view;
   const [showAutoTurnInstructions, setShowAutoTurnInstructions] = useState(false);
@@ -146,7 +117,7 @@ export function InputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
             className="node-info-button input-port-help-button nodrag"
             type="button"
             aria-label="Message Format help"
-            data-tooltip={messageFormatHelpText}
+            onClick={() => showOutputFormatHelp('user-input')}
           >
             ?
           </button>
@@ -158,11 +129,23 @@ export function InputNodeCard({ id, data }: NodeProps<WorkflowNode>) {
             className="node-info-button input-port-help-button nodrag"
             type="button"
             aria-label="Turn Mode help"
-            data-tooltip={turnModeHelpText}
+            onClick={() => showOutputFormatHelp('user-input')}
           >
             ?
           </button>
           <Handle id="turn-mode" type="source" position={Position.Right} />
+        </div>
+        <div className="workflow-port workflow-port-output">
+          <PortLabel data={data} direction="output" handle="direct-actions" label="Direct Actions" valueType="mixed" />
+          <button
+            className="node-info-button input-port-help-button nodrag"
+            type="button"
+            aria-label="Direct Actions help"
+            onClick={() => showOutputFormatHelp('user-input')}
+          >
+            ?
+          </button>
+          <Handle id="direct-actions" type="source" position={Position.Right} />
         </div>
       </div>
       {showAutoTurnInstructions && typeof document !== 'undefined' && createPortal(

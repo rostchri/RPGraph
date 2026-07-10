@@ -3558,6 +3558,7 @@ export function OutputFormatHelpDialog({
 }: OutputFormatHelpDialogProps) {
   const help = outputFormatHelp[kind];
   const isPromptHelp = kind === 'output-actions';
+  const isFullGuide = kind === 'user-input' || kind === 'rp-output';
   const backdropDismiss = useBackdropDismiss<HTMLDivElement>(onClose);
 
   return (
@@ -3587,7 +3588,7 @@ export function OutputFormatHelpDialog({
           </label>
           <JsonSyntaxTextarea
             id="output-format-prompt"
-            rows={kind === 'phone' ? 19 : 17}
+            rows={isFullGuide ? 30 : kind === 'phone' ? 19 : 17}
             readOnly
             value={help.prompt}
           />

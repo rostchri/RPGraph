@@ -11,7 +11,7 @@ export type ParsedNodeVersion = {
 const nodeVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export const currentCoreNodeVersions: Record<CoreNodeType, NodeVersion> = {
-  input: '1.6.0',
+  input: '1.7.0',
   note: '1.0.0',
   group: '1.0.0',
   custom: '1.0.9',
@@ -36,7 +36,7 @@ export const currentCoreNodeVersions: Record<CoreNodeType, NodeVersion> = {
   'fixed-bool': '1.0.0',
   'settings-value': '1.0.1',
   'rp-storybook-v1': '1.13.0',
-  output: '1.4.2',
+  output: '1.5.1',
 };
 
 export function parseNodeVersion(value: unknown): ParsedNodeVersion | undefined {

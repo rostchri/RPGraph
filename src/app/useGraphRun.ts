@@ -67,6 +67,7 @@ import {
   type OutputActionChatMessage,
   type OutputActionContextCapacityRequest,
   type OutputActionUiItem,
+  type ParsedOutputActions,
 } from '../chat/outputActions';
 import {
   bankingBalanceForCharacter,
@@ -119,6 +120,24 @@ export type OutputAttribution = {
 type Ref<T> = { current: T };
 
 const liveOutputFlushIntervalMs = 100;
+
+function mergeOutputActions(
+  primary: ParsedOutputActions,
+  direct: ParsedOutputActions,
+): ParsedOutputActions {
+  return {
+    phoneMessages: [...primary.phoneMessages, ...direct.phoneMessages],
+    bankTransfers: [...primary.bankTransfers, ...direct.bankTransfers],
+    chatMessages: [...primary.chatMessages, ...direct.chatMessages],
+    choiceGroups: [...primary.choiceGroups, ...direct.choiceGroups],
+    infoBoxes: [...primary.infoBoxes, ...direct.infoBoxes],
+    progressBars: [...primary.progressBars, ...direct.progressBars],
+    contextCapacityBars: [...primary.contextCapacityBars, ...direct.contextCapacityBars],
+    uiItems: [...primary.uiItems, ...direct.uiItems],
+    controls: [...primary.controls, ...direct.controls],
+    warnings: [...primary.warnings, ...direct.warnings],
+  };
+}
 
 type ExecuteGraphOptions = Parameters<typeof executeGraph>[0];
 type TurnRecordApi = ReturnType<typeof useTurnRecordState>;
@@ -410,6 +429,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
     socialPost?: SocialPostRecord,
     socialThreadAction?: SocialThreadActionRecord,
     socialThreadContext?: SocialThreadRunContext,
+    directActionOnly = false,
   ) {
     const isAutoTurn = turnMode === 'auto-turn';
     const isNarratorTurn = turnMode === 'narrator';
@@ -447,7 +467,9 @@ export function useGraphRun(options: UseGraphRunOptions) {
       notifySystem('warning', 'Select a Storybook character to play as.');
       return false;
     }
-    const providerHealthForRun = await checkProviderConnections(connections);
+    const providerHealthForRun = directActionOnly
+      ? {}
+      : await checkProviderConnections(connections);
     const usedLlmConnectionIds = new Set(
       runtimeNodes.flatMap((node) => {
         if (node.data.kind !== undefined || !Object.prototype.hasOwnProperty.call(node.data, 'connectionId')) {
@@ -496,6 +518,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
         socialPost,
         socialThreadAction,
         socialThreadContext,
+        directActionOnly,
       );
     };
     const finishRun = () => {
@@ -543,8 +566,8 @@ export function useGraphRun(options: UseGraphRunOptions) {
         : inputTranslationOnlyEnabled,
       displayLanguage,
     };
-    const runEnglishProcessing = turnContext.englishProcessingEnabled;
-    const translateInputOnly = !runEnglishProcessing && !!turnContext.inputTranslationOnlyEnabled;
+    const runEnglishProcessing = !directActionOnly && turnContext.englishProcessingEnabled;
+    const translateInputOnly = !directActionOnly && !runEnglishProcessing && !!turnContext.inputTranslationOnlyEnabled;
     let executionNodes = runtimeNodes;
     const workflowVariablesBeforeAttempt = structuredClone(workflowSettingsValuesRef.current);
     const runtimeBeforeAttempt = captureTurnRuntime(runtimeNodes, workflowVariablesBeforeAttempt);
@@ -1179,8 +1202,10 @@ export function useGraphRun(options: UseGraphRunOptions) {
       let phoneMessageOutput = '';
       let outputActionsText = '';
       let socialMediaOutputText = '';
-      const graphOutput = await executeGraph({
+      let directActionsText = '';
+      const executedOutput = await executeGraph({
         outputNodeId: outputNode.id,
+        outputSourceHandle: directActionOnly ? 'direct-actions' : undefined,
         nodes: executionNodes,
         edges,
         originalInput,
@@ -1215,7 +1240,9 @@ export function useGraphRun(options: UseGraphRunOptions) {
           runTraceEvents.push({ kind: 'format', ...result });
         },
         trackRunCompletion: true,
-        auxiliaryOutputHandles: ['output-actions', 'highlighting-context', 'phone-message', 'social-media'],
+        auxiliaryOutputHandles: directActionOnly
+          ? []
+          : ['output-actions', 'highlighting-context', 'phone-message', 'social-media', 'direct-actions'],
         onAuxiliaryOutput: (handle, text) => {
           if (handle === 'highlighting-context') {
             outputHighlightingContext = text;
@@ -1229,6 +1256,9 @@ export function useGraphRun(options: UseGraphRunOptions) {
           if (handle === 'social-media') {
             socialMediaOutputText = text;
           }
+          if (handle === 'direct-actions') {
+            directActionsText = text;
+          }
         },
         streamOutput:
           messageFormat !== 2 &&
@@ -1239,6 +1269,10 @@ export function useGraphRun(options: UseGraphRunOptions) {
             : undefined,
         signal: runSignal,
       });
+      const graphOutput = directActionOnly ? '' : executedOutput;
+      if (directActionOnly) {
+        directActionsText = executedOutput;
+      }
       flushLiveOutput();
       const parsedRpOutput = isPhoneMessage
         ? { story: graphOutput }
@@ -1414,6 +1448,19 @@ export function useGraphRun(options: UseGraphRunOptions) {
         });
       }
       outputActions.warnings.forEach((warning) => reportRunWarning(warning, outputNodeTraceInfo));
+      const directActions = parseOutputActions(directActionsText);
+      if (directActionsText.trim()) {
+        reportFormatResult({
+          name: 'Direct Actions JSON',
+          status: directActions.warnings.length ? 'error' : 'ok',
+          detail: directActions.warnings.length
+            ? directActions.warnings.join(' ')
+            : 'Direct Actions parsed.',
+          preview: directActions.warnings.length ? directActionsText : undefined,
+        });
+      }
+      directActions.warnings.forEach((warning) => reportRunWarning(warning, outputNodeTraceInfo));
+      const appliedActions = mergeOutputActions(outputActions, directActions);
       const embeddedPhoneMessages: EmbeddedPhoneMessageLink[] = [];
       if (embeddedPhoneResult.phoneMessages.length > 0) {
         for (const [index, embeddedPhoneMessage] of embeddedPhoneResult.phoneMessages.entries()) {
@@ -1541,7 +1588,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
       const displayOutput = translatedOutput ?? rpOutput;
       let attribution: OutputAttribution = { speakerNames: [], dialogue: [] };
       let analysisError: string | undefined;
-      {
+      if (!directActionOnly) {
         try {
           attribution = await analyzeDisplayedOutput(
             displayOutput,
@@ -1655,7 +1702,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
           }
         };
 
-        outputActions.controls.forEach((control) => {
+        appliedActions.controls.forEach((control) => {
           if (control.type === 'setTab') {
             selectChatPanelView(control.tab);
             return;
@@ -1677,7 +1724,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
           }
         });
 
-        for (const chatMessage of outputActions.chatMessages) {
+        for (const chatMessage of appliedActions.chatMessages) {
           const translatedText = await translateOutputActionText(chatMessage.text, chatMessage);
           const speakerName = chatMessage.speakerName;
           appendMessage({
@@ -1739,9 +1786,9 @@ export function useGraphRun(options: UseGraphRunOptions) {
           });
         };
 
-        outputActions.uiItems.forEach(appendOutputActionUiItem);
+        appliedActions.uiItems.forEach(appendOutputActionUiItem);
 
-        for (const [index, actionPhoneMessage] of outputActions.phoneMessages.entries()) {
+        for (const [index, actionPhoneMessage] of appliedActions.phoneMessages.entries()) {
           const canonicalActionPhoneMessage = {
             ...actionPhoneMessage,
             from: canonicalPhoneName(phoneCharacters, actionPhoneMessage.from),
@@ -1786,7 +1833,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
         }
 
         for (const bankTransfer of [
-          ...outputActions.bankTransfers,
+          ...appliedActions.bankTransfers,
           ...embeddedPhoneResult.bankTransfers,
           ...(phoneOutputBankResult?.bankTransfers ?? []),
         ]) {
@@ -1971,11 +2018,12 @@ export function useGraphRun(options: UseGraphRunOptions) {
         rpDateTimeFormat,
         rpWeekdayLanguage,
       );
-      try {
-        const recentTurns = turnsRef.current
-          .filter((turn) => turn.id !== collectedTurn?.turnId)
-          .slice(-5);
-        await executeGraph({
+      if (!directActionOnly) {
+        try {
+          const recentTurns = turnsRef.current
+            .filter((turn) => turn.id !== collectedTurn?.turnId)
+            .slice(-5);
+          await executeGraph({
           outputNodeId: outputNode.id,
           postOutputRun: true,
           postOutputNodeIds: nodesPreparedAfterOutput(nodesRef.current, edges),
@@ -2012,14 +2060,15 @@ export function useGraphRun(options: UseGraphRunOptions) {
           retryFormatErrorsEnabled,
           trackRunCompletion: true,
           signal: runSignal,
-        });
-      } catch (error) {
-        if (isRunCancelledError(error)) {
-          throw error;
+          });
+        } catch (error) {
+          if (isRunCancelledError(error)) {
+            throw error;
+          }
+          reportRunWarning(
+            `Next-turn preparation failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
-        reportRunWarning(
-          `Next-turn preparation failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
       }
       onSuccessfulRunBeforeCommit?.();
       const committedTurn = commitCollectedTurn(
@@ -2029,7 +2078,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
         checkpointBeforeWorkflowVariables,
         replacement,
         turnMode,
-        { messageFormat, promptSlot },
+        { messageFormat, promptSlot, directAction: directActionOnly },
       );
       const completedRunReport = activeRunLlmReport.current;
       if (committedTurn && completedRunReport) {
@@ -2060,6 +2109,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
           mode: turnMode,
           messageFormat,
           promptSlot,
+          directAction: directActionOnly || undefined,
           input: {
             graphText: storedInputGraphText,
             messages: structuredClone(failedCollector.inputMessages),

@@ -16,19 +16,20 @@ export function bankTransferHistoryText(transfer: BankTransferRecord) {
   return transfer.note?.trim() ? `${base} Note: "${transfer.note.trim()}"` : base;
 }
 
-export function bankTransferInputText(request: {
+export function bankTransferActionJson(request: {
   from: string;
   to: string;
   amount: number;
   note: string;
 }) {
-  return [
-    '[BANK TRANSFER REQUEST]',
-    `From: ${request.from}`,
-    `To: ${request.to}`,
-    `Amount: ${formatBankingAmount(request.amount)}`,
-    ...(request.note.trim() ? [`Note: ${request.note.trim()}`] : []),
-  ].join('\n');
+  return JSON.stringify({
+    bankTransfers: [{
+      from: request.from,
+      to: request.to,
+      amount: request.amount,
+      ...(request.note.trim() ? { note: request.note.trim() } : {}),
+    }],
+  });
 }
 
 export function bankTransferMessages(messages: MessageRecord[]) {

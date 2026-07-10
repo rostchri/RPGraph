@@ -785,6 +785,7 @@ export type TurnRecord = {
   mode?: TurnRecordMode;
   messageFormat?: number;
   promptSlot?: number;
+  directAction?: boolean;
   input: TurnRecordPart;
   output: TurnRecordPart;
 };
