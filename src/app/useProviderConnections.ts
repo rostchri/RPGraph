@@ -129,6 +129,10 @@ type UseProviderConnectionsOptions = {
   defaultConnectionId: string;
   setDefaultConnectionId: (connectionId: string) => void;
   settingsLoadComplete: boolean;
+  // Whether a run/turn is currently active. The background health poll pauses
+  // while true and the connections dialog is closed (providers do not change
+  // mid-run).
+  isRunning: boolean;
   nodesRef: { current: WorkflowNode[] };
   setNodes: Dispatch<SetStateAction<WorkflowNode[]>>;
   notifySystem: (level: 'info' | 'warning' | 'error', text: string) => void;
@@ -140,6 +144,7 @@ export function useProviderConnections({
   defaultConnectionId,
   setDefaultConnectionId,
   settingsLoadComplete,
+  isRunning,
   nodesRef,
   setNodes,
   notifySystem,
@@ -1016,11 +1021,15 @@ export function useProviderConnections({
   const checkProviderConnectionsRef = useRef(checkProviderConnections);
   const inspectComfyWorkflowRef = useRef(inspectComfyWorkflow);
   const editingConnectionRef = useRef(editingConnection);
+  const isRunningRef = useRef(isRunning);
+  const showConnectionsRef = useRef(showConnections);
   useEffect(() => {
     checkProviderConnectionByIdRef.current = checkProviderConnectionById;
     checkProviderConnectionsRef.current = checkProviderConnections;
     inspectComfyWorkflowRef.current = inspectComfyWorkflow;
     editingConnectionRef.current = editingConnection;
+    isRunningRef.current = isRunning;
+    showConnectionsRef.current = showConnections;
   });
 
   useEffect(() => {
@@ -1036,6 +1045,14 @@ export function useProviderConnections({
       return;
     }
     const checkLocalProviders = async () => {
+      // Skip the background health poll while a turn is running AND the
+      // connections dialog is closed — providers do not change mid-run, so this
+      // avoids redundant check-connection round-trips (and the list-models +
+      // settings-save churn they cascade into) during generation. When the dialog
+      // is open the user may be tuning a provider, so keep polling to reflect it.
+      if (isRunningRef.current && !showConnectionsRef.current) {
+        return;
+      }
       if (localProviderPollActiveRef.current) {
         return;
       }
