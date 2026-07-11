@@ -2,6 +2,7 @@ import { type FormEvent, useMemo, useState } from 'react';
 import type { StorybookCharacter } from '../../storybook/runtime';
 import type { ChatImageAttachment, SocialAppKind, SocialDirectMessageRecord } from '../../types';
 import { formatBankingAmount } from '../../chat/bankTransfers';
+import { socialIdentityMatches } from '../../chat/socialMedia';
 import { CharacterAvatar } from '../CharacterAvatar';
 
 export type SocialDirectMessageParticipant = {
@@ -27,11 +28,6 @@ type PhoneSocialDirectMessagesProps = {
   onBack: () => void;
   onSend: (message: SocialDirectMessageRecord) => Promise<boolean>;
 };
-
-function identityMatches(left: string, right: string) {
-  return left.trim().replace(/^@/, '').toLocaleLowerCase() ===
-    right.trim().replace(/^@/, '').toLocaleLowerCase();
-}
 
 export function PhoneSocialDirectMessages({
   app,
@@ -65,10 +61,10 @@ export function PhoneSocialDirectMessages({
     }
     return messages.filter((message) =>
       message.app === app && (
-        identityMatches(message.fromHandle, ownerHandle) &&
-        identityMatches(message.toHandle, selectedParticipant.handle) ||
-        identityMatches(message.toHandle, ownerHandle) &&
-        identityMatches(message.fromHandle, selectedParticipant.handle)
+        socialIdentityMatches(message.fromHandle, ownerHandle) &&
+        socialIdentityMatches(message.toHandle, selectedParticipant.handle) ||
+        socialIdentityMatches(message.toHandle, ownerHandle) &&
+        socialIdentityMatches(message.fromHandle, selectedParticipant.handle)
       ),
     );
   }, [app, messages, ownerHandle, selectedParticipant]);
@@ -119,10 +115,10 @@ export function PhoneSocialDirectMessages({
               : undefined;
             const latest = [...messages].reverse().find((message) =>
               message.app === app && (
-                identityMatches(message.fromHandle, ownerHandle) &&
-                identityMatches(message.toHandle, participant.handle) ||
-                identityMatches(message.toHandle, ownerHandle) &&
-                identityMatches(message.fromHandle, participant.handle)
+                socialIdentityMatches(message.fromHandle, ownerHandle) &&
+                socialIdentityMatches(message.toHandle, participant.handle) ||
+                socialIdentityMatches(message.toHandle, ownerHandle) &&
+                socialIdentityMatches(message.fromHandle, participant.handle)
               ),
             );
             return (
@@ -166,11 +162,11 @@ export function PhoneSocialDirectMessages({
   // The stored origin comment keeps its real author; when the viewer wrote
   // that comment (e.g. after switching characters), it renders as outgoing.
   const originOutgoing = !!origin?.commentAuthorHandle &&
-    identityMatches(origin.commentAuthorHandle, ownerHandle);
+    socialIdentityMatches(origin.commentAuthorHandle, ownerHandle);
   const originLabel = origin?.commentText
     ? originOutgoing
       ? `Your comment on @${origin.postAuthorHandle}'s post`
-      : identityMatches(origin.postAuthorHandle, ownerHandle)
+      : socialIdentityMatches(origin.postAuthorHandle, ownerHandle)
         ? 'Comment on your post'
         : `Comment on @${origin.postAuthorHandle}'s post`
     : '';
@@ -238,7 +234,7 @@ export function PhoneSocialDirectMessages({
           </div>
         )}
         {conversation.map((message) => {
-          const outgoing = identityMatches(message.fromHandle, ownerHandle);
+          const outgoing = socialIdentityMatches(message.fromHandle, ownerHandle);
           return (
             <div className={`phone-social-dm-message-row ${outgoing ? 'outgoing' : 'incoming'}`} key={message.messageId}>
               <div className="phone-social-dm-bubble">

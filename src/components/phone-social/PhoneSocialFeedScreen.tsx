@@ -1004,14 +1004,14 @@ export function PhoneSocialFeedScreen({
 
   function createAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = nickname.trim().replace(/\s+/g, ' ');
-    if (!name || !owner) {
+    const username = socialHandleForName(nickname);
+    if (!nickname.trim() || !owner) {
       return;
     }
     // The account name is persisted in the Storybook so it survives closing
     // the app and is part of the story data.
-    onCreateSocialAccount(owner, app.id, name);
-    setAccount(name);
+    onCreateSocialAccount(owner, app.id, username);
+    setAccount(username);
     setNickname('');
   }
 
@@ -1026,10 +1026,13 @@ export function PhoneSocialFeedScreen({
       name,
       handle: socialHandleForName(name),
     };
-    if (!followedAccounts.some((entry) => entry.key === personAccount.key)) {
+    const existingAccount = followedAccounts.find((entry) =>
+      socialIdentityMatches(entry.handle, personAccount.handle),
+    );
+    if (!existingAccount) {
       setAddedAccounts((current) => [...current, personAccount]);
     }
-    setSelectedAccountKey(personAccount.key);
+    setSelectedAccountKey(existingAccount?.key ?? personAccount.key);
     setNewPersonName('');
     setAddingPerson(false);
   }
@@ -1131,7 +1134,10 @@ export function PhoneSocialFeedScreen({
   }
 
   const directMessageCharacterAccounts: SocialDirectMessageParticipant[] = storyCharacters
-    .filter((character) => character.id !== owner?.id)
+    .filter((character) =>
+      character.id !== owner?.id &&
+      (app.id === 'fotogram' || !!character.social.onlyfriendsUsername.trim()),
+    )
     .map((character) => ({
       key: `character-${character.id}`,
       name: character.name,
@@ -1353,7 +1359,7 @@ export function PhoneSocialFeedScreen({
                   type="button"
                   key={entry.key}
                   className={`phone-social-account${selectedAccountKey === entry.key ? ' active' : ''}`}
-                  onClick={() => openDirectMessages(entry)}
+                  onClick={() => setSelectedAccountKey(entry.key)}
                 >
                   <CharacterAvatar
                     className="phone-avatar"
