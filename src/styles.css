@@ -11948,10 +11948,13 @@ button.message-timeline-row.phone:focus-visible {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid #303a4e;
-  border-radius: 18px;
-  background: #111722;
-  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(138, 115, 201, 0.28);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 82% -8%, rgba(138, 115, 201, 0.14), transparent 38%),
+    radial-gradient(circle at 8% 112%, rgba(126, 185, 197, 0.09), transparent 34%),
+    #10151f;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
 }
 
 .image-generation-assistant-workspace {
@@ -11959,8 +11962,8 @@ button.message-timeline-row.phone:focus-visible {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(300px, 1fr) minmax(300px, 0.8fr) minmax(340px, 0.85fr);
-  gap: 18px;
-  padding: 18px 22px 22px;
+  gap: 16px;
+  padding: 16px 20px 20px;
 }
 
 .image-generation-preview-panel,
@@ -11968,9 +11971,10 @@ button.message-timeline-row.phone:focus-visible {
 .image-generation-prompt-panel {
   min-height: 0;
   overflow: hidden;
-  border: 1px solid #232d42;
-  border-radius: 12px;
-  background: rgba(13, 20, 32, 0.45);
+  border: 1px solid rgba(80, 96, 130, 0.34);
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(24, 32, 49, 0.72), rgba(13, 19, 31, 0.72));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .image-generation-preview-panel,
@@ -11984,8 +11988,14 @@ button.message-timeline-row.phone:focus-visible {
   min-height: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: radial-gradient(circle at center, #182238, #090e17 72%);
+  padding: 22px;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(138, 115, 201, 0.12), transparent 58%),
+    radial-gradient(circle at center, #161f33, #080c15 76%);
+}
+
+.image-generation-preview-stage > img {
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
 
 .image-generation-placeholder {
@@ -11995,16 +12005,21 @@ button.message-timeline-row.phone:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   padding: 30px;
-  border: 1px dashed #3a4863;
-  border-radius: 14px;
+  border: 1.5px dashed rgba(138, 115, 201, 0.35);
+  border-radius: 18px;
   color: #77849b;
   text-align: center;
-  background: rgba(7, 11, 19, 0.55);
+  background: rgba(10, 14, 23, 0.55);
 }
 
-.image-generation-placeholder strong { color: #cbd3e4; }
+.image-generation-placeholder svg {
+  color: var(--accent-light);
+  opacity: 0.75;
+}
+
+.image-generation-placeholder strong { color: #d5dbec; font-size: 14px; }
 .image-generation-placeholder span { max-width: 300px; font-size: 12px; line-height: 1.5; }
 
 .image-generation-control-panel {
@@ -12017,11 +12032,17 @@ button.message-timeline-row.phone:focus-visible {
 .image-generation-provider-fields {
   display: grid;
   gap: 14px;
-  padding: 18px;
+  padding: 16px 18px 18px;
 }
 
 .image-generation-provider-fields label { display: grid; gap: 7px; }
-.image-generation-provider-fields label > span { color: #aeb8ca; font-size: 12px; font-weight: 700; }
+.image-generation-provider-fields label > span {
+  color: #93a0b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .image-generation-provider-fields select {
   width: 100%;
   padding: 10px 12px;
@@ -12035,14 +12056,21 @@ button.message-timeline-row.phone:focus-visible {
   flex: 1;
   min-height: 180px;
   resize: none;
-  margin: 16px;
+  margin: 14px;
   padding: 14px;
-  border: 1px solid #344159;
-  border-radius: 9px;
+  border: 1px solid rgba(72, 88, 122, 0.55);
+  border-radius: 12px;
   color: #e7ecf8;
-  background: #090f19;
+  background: rgba(8, 13, 22, 0.85);
   font: inherit;
   line-height: 1.55;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.image-generation-prompt-panel textarea:focus {
+  outline: none;
+  border-color: rgba(138, 115, 201, 0.65);
+  box-shadow: 0 0 0 3px rgba(138, 115, 201, 0.15);
 }
 
 .image-generation-prompt-actions {
@@ -20066,17 +20094,24 @@ button.message-timeline-row.phone:focus-visible {
 
 /* Main Header adjustments */
 .image-generation-assistant-dialog .dialog-header.storybook-creator-header {
-  padding: 9px 23px;
-  min-height: 54px;
+  padding: 11px 23px;
+  min-height: 58px;
   align-items: center;
+  border-bottom: 1px solid rgba(138, 115, 201, 0.22);
+  background: linear-gradient(135deg, rgba(138, 115, 201, 0.16), rgba(126, 185, 197, 0.05) 62%, transparent);
 }
 
 .image-generation-assistant-dialog .storybook-title-row h2 {
   font-size: 18px;
+  background: linear-gradient(90deg, #eef1ff, var(--accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .image-generation-assistant-dialog .storybook-title-row p {
   font-size: 12px;
+  color: var(--muted);
 }
 
 /* Image Preview Header larger padding & font size */
@@ -20096,12 +20131,12 @@ button.message-timeline-row.phone:focus-visible {
 }
 
 .preview-nav-btn {
-  background: #1e293b;
-  border: 1px solid #334155;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(71, 85, 105, 0.7);
   color: #f8fafc;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -20112,8 +20147,8 @@ button.message-timeline-row.phone:focus-visible {
 }
 
 .preview-nav-btn:hover:not(:disabled) {
-  background: #334155;
-  border-color: #475569;
+  background: rgba(138, 115, 201, 0.28);
+  border-color: rgba(138, 115, 201, 0.55);
 }
 
 .preview-nav-btn:disabled {
@@ -20137,19 +20172,20 @@ button.message-timeline-row.phone:focus-visible {
   padding: 0 14px;
   font-size: 12px;
   font-weight: 700;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(138, 115, 201, 0.25);
-  border: 1px solid rgba(138, 115, 201, 0.4);
+  background: linear-gradient(135deg, rgba(138, 115, 201, 0.85), rgba(99, 102, 190, 0.85));
+  border: 1px solid rgba(178, 156, 227, 0.5);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(138, 115, 201, 0.15);
+  box-shadow: 0 4px 14px rgba(138, 115, 201, 0.3);
 }
 
 .preview-save-btn:hover:not(:disabled) {
-  background: rgba(138, 115, 201, 0.4);
-  border-color: rgba(138, 115, 201, 0.6);
+  background: linear-gradient(135deg, rgba(155, 133, 216, 0.95), rgba(114, 117, 205, 0.95));
+  border-color: rgba(198, 180, 238, 0.7);
   transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(138, 115, 201, 0.4);
 }
 
 .preview-save-btn:disabled {
@@ -20182,13 +20218,20 @@ button.message-timeline-row.phone:focus-visible {
 
 .preview-describe-btn {
   height: 28px;
-  padding: 0 10px;
-  border: 1px solid #475569;
-  border-radius: 6px;
+  padding: 0 12px;
+  border: 1px solid rgba(71, 85, 105, 0.7);
+  border-radius: 999px;
   color: #e2e8f0;
-  background: #1e293b;
+  background: rgba(30, 41, 59, 0.85);
   font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preview-describe-btn:hover:not(:disabled) {
+  background: rgba(138, 115, 201, 0.28);
+  border-color: rgba(138, 115, 201, 0.55);
 }
 
 .preview-describe-btn:disabled {
@@ -20211,13 +20254,14 @@ button.message-timeline-row.phone:focus-visible {
   min-width: 104px;
   height: 34px;
   padding: 0 9px;
-  border: 1px solid #3a465b;
-  border-radius: 7px;
+  border: 1px solid rgba(58, 70, 91, 0.9);
+  border-radius: 999px;
   color: #aeb8ca;
-  background: #151d2c;
+  background: rgba(21, 29, 44, 0.9);
   font-size: 10px;
   font-weight: 750;
   white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
 .image-model-state-button.loaded {
@@ -20268,20 +20312,21 @@ button.message-timeline-row.phone:focus-visible {
   padding: 0 14px;
   font-size: 12px;
   font-weight: 700;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(138, 115, 201, 0.25);
-  border: 1px solid rgba(138, 115, 201, 0.4);
+  background: linear-gradient(135deg, rgba(138, 115, 201, 0.85), rgba(99, 102, 190, 0.85));
+  border: 1px solid rgba(178, 156, 227, 0.5);
   color: #fff;
-  box-shadow: 0 2px 6px rgba(138, 115, 201, 0.1);
+  box-shadow: 0 4px 14px rgba(138, 115, 201, 0.25);
   text-transform: none;
   letter-spacing: normal;
 }
 
 .prompt-generate-btn:hover:not(:disabled) {
-  background: rgba(138, 115, 201, 0.4);
-  border-color: rgba(138, 115, 201, 0.6);
+  background: linear-gradient(135deg, rgba(155, 133, 216, 0.95), rgba(114, 117, 205, 0.95));
+  border-color: rgba(198, 180, 238, 0.7);
+  box-shadow: 0 6px 18px rgba(138, 115, 201, 0.35);
 }
 
 .prompt-generate-btn:disabled {
@@ -20327,11 +20372,11 @@ button.message-timeline-row.phone:focus-visible {
   min-width: 210px;
   max-height: 280px;
   overflow-y: auto;
-  padding: 5px;
-  border: 1px solid #3a465b;
-  border-radius: 9px;
-  background: #111927;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  border: 1px solid rgba(138, 115, 201, 0.35);
+  border-radius: 12px;
+  background: rgba(17, 25, 39, 0.98);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
 }
 
 .image-save-character-menu button {
@@ -20369,6 +20414,20 @@ button.message-timeline-row.phone:focus-visible {
 }
 
 /* Chat Header clear button and row layout */
+.image-generation-chat-panel .storybook-chat-header .prompt-generate-btn {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(71, 85, 105, 0.7);
+  box-shadow: none;
+  color: #cbd5e1;
+}
+
+.image-generation-chat-panel .storybook-chat-header .prompt-generate-btn:hover:not(:disabled) {
+  background: rgba(138, 115, 201, 0.28);
+  border-color: rgba(138, 115, 201, 0.55);
+  color: #fff;
+  box-shadow: none;
+}
+
 .image-generation-chat-panel .storybook-chat-header {
   flex-direction: row;
   align-items: center;

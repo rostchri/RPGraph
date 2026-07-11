@@ -495,8 +495,8 @@ export function ImageGenerationAssistantDialog({
                     <circle cx="8.5" cy="8.5" r="1.5" />
                     <polyline points="21 15 16 10 5 21" />
                   </svg>
-                  <strong>Your generated image will appear here</strong>
-                  <span>Generate an image to preview it here.</span>
+                  <strong>No image yet</strong>
+                  <span>Describe the picture in the assistant chat, then press Generate Image.</span>
                 </div>
               )}
             </div>
@@ -656,7 +656,7 @@ export function ImageGenerationAssistantDialog({
             <div className="storybook-chat-header image-chat-header">
               <div className="storybook-chat-header-text">
                 <span className="panel-title">AI Image Assistant</span>
-                <span className="panel-subtitle">By AI Image Assistant</span>
+                <span className="panel-subtitle">Refines your prompt, settings, and description</span>
               </div>
               <div className="storybook-header-actions">
                 <button
