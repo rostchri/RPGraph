@@ -92,20 +92,15 @@ Legend: `[ ]` open · `[x]` done (add date + short note when closing).
 
 ## Low priority
 
-- [ ] **9. Launchers do not detect outdated packages**
-  - Files: `RPGraph-linux.sh:50`, `RPGraph-windows.bat:46`
-  - They only check whether `node_modules` exists, not whether it matches the lockfile.
-  - Effort: **Low**. Scope: **Small**.
+- [✅] **9. Launchers do not detect outdated packages** (2026-07-11)
+  - Fixed: installs now store a lockfile snapshot in `node_modules`; launchers
+    compare it against `package-lock.json` and reinstall when it differs.
 
-- [ ] **10. Launchers use `npm install` instead of `npm ci`**
-  - Files: `RPGraph-linux.sh:55`, `RPGraph-windows.bat:49`
-  - Installs can drift or change the lockfile.
-  - Effort: **Low**. Scope: **Small**.
+- [✅] **10. Launchers use `npm install` instead of `npm ci`** (2026-07-11)
+  - Fixed: both launchers now run `npm ci` for the dependency install paths.
 
-- [ ] **11. README version is outdated**
-  - File: `README.md:88`
-  - Shows `0.4.4`; app and `package.json` are already `0.4.6`.
-  - Effort: **Trivial**. Scope: **Trivial**.
+- [✅] **11. README version is outdated** (2026-07-11)
+  - Fixed: README beta notice now shows `v0.4.6`.
 
 ---
 

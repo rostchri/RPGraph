@@ -44,10 +44,15 @@ echo Invalid selection.
 goto pause_and_menu
 
 :ensure_dependencies
-if exist "node_modules\" exit /b 0
+rem The lockfile snapshot lets us detect when package-lock.json changed since
+rem the last install (e.g. after a git pull), not just whether node_modules exists.
+if exist "node_modules\" (
+  fc /b "package-lock.json" "node_modules\.rpgraph-package-lock.json" >nul 2>&1
+  if not errorlevel 1 exit /b 0
+)
 
 echo.
-choice /C YN /N /M "Dependencies are missing. Install them now with npm install? [Y/N] "
+choice /C YN /N /M "Dependencies are missing or outdated. Install them now with npm ci? [Y/N] "
 if errorlevel 2 (
   echo.
   echo Start canceled: please run option 4 first.
@@ -55,7 +60,13 @@ if errorlevel 2 (
 )
 
 echo.
-call npm install
+call :run_clean_install
+exit /b %errorlevel%
+
+:run_clean_install
+call npm ci
+if errorlevel 1 exit /b %errorlevel%
+copy /y "package-lock.json" "node_modules\.rpgraph-package-lock.json" >nul
 exit /b %errorlevel%
 
 :start_normal
@@ -87,8 +98,8 @@ goto pause_and_menu
 
 :install_dependencies
 echo.
-echo Installing or updating dependencies ...
-call npm install
+echo Installing dependencies exactly as pinned in package-lock.json ...
+call :run_clean_install
 goto pause_and_menu
 
 :reset_generated_files
@@ -104,7 +115,7 @@ if exist "dist\" rmdir /s /q "dist"
 echo dist has been removed.
 
 :ask_remove_modules
-choice /C YN /N /M "Remove node_modules too? npm install will be required afterward. [Y/N] "
+choice /C YN /N /M "Remove node_modules too? npm ci will be required afterward. [Y/N] "
 if errorlevel 2 goto pause_and_menu
 if exist "node_modules\" rmdir /s /q "node_modules"
 echo node_modules has been removed.

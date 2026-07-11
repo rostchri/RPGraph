@@ -47,16 +47,25 @@ pause() {
   read -r _
 }
 
+# The lockfile snapshot lets us detect when package-lock.json changed since
+# the last install (e.g. after a git pull), not just whether node_modules exists.
+lockfile_snapshot="node_modules/.rpgraph-package-lock.json"
+
+run_clean_install() {
+  npm ci || return $?
+  cp package-lock.json "$lockfile_snapshot"
+}
+
 ensure_dependencies() {
-  if [[ -d node_modules ]]; then
+  if [[ -d node_modules ]] && cmp -s package-lock.json "$lockfile_snapshot"; then
     return 0
   fi
 
-  printf "\nDependencies are missing. Install them now with npm install? [y/N] "
+  printf "\nDependencies are missing or outdated. Install them now with npm ci? [y/N] "
   read -r answer
 
   if [[ "$answer" =~ ^[Yy]$ ]]; then
-    npm install
+    run_clean_install
     return $?
   fi
 
@@ -86,8 +95,8 @@ build_app() {
 }
 
 install_dependencies() {
-  printf "\nInstalling or updating dependencies ...\n"
-  npm install
+  printf "\nInstalling dependencies exactly as pinned in package-lock.json ...\n"
+  run_clean_install
 }
 
 reset_generated_files() {
@@ -103,7 +112,7 @@ reset_generated_files() {
     printf "dist has been removed.\n"
   fi
 
-  printf "Remove node_modules too? npm install will be required afterward. [y/N] "
+  printf "Remove node_modules too? npm ci will be required afterward. [y/N] "
   read -r remove_modules
 
   if [[ "$remove_modules" =~ ^[Yy]$ ]]; then
