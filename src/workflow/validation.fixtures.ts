@@ -1631,6 +1631,26 @@ export function verifyWorkflowValidationFixtures() {
     !isRpgraphSessionV2(nestedReplySession),
     'RP Save Format v2 must reject nested phone reply links',
   );
+  const externalImageSession = structuredClone(sessionV2);
+  const externalImageId = Object.keys(externalImageSession.entities.images)[0];
+  if (externalImageId) {
+    externalImageSession.entities.images[externalImageId]!.dataUrl = 'https://tracker.example/pixel.png';
+  }
+  assertFixture(
+    !!externalImageId && !isRpgraphSessionV2(externalImageSession),
+    'RP Save Format v2 must reject non-data image URLs',
+  );
+  const externalVoiceSession = structuredClone(sessionV2);
+  const externalVoiceEntry = externalVoiceSession.timeline.find(
+    (entry): entry is TimelineMessageEntry => entry.kind === 'message' && !!entry.voiceClips?.length,
+  );
+  if (externalVoiceEntry?.voiceClips?.[0]) {
+    externalVoiceEntry.voiceClips[0].dataUrl = 'https://tracker.example/clip.mp3';
+  }
+  assertFixture(
+    !!externalVoiceEntry && !isRpgraphSessionV2(externalVoiceSession),
+    'RP Save Format v2 must reject non-data voice clip URLs',
+  );
   assertFixture(latestSessionV2TurnNumber(sessionV2) === 1, 'RP Save Format v2 must retain latest turn number');
   const restoredAppState = appStateFromSessionV2(sessionV2);
   assertFixture(

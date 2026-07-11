@@ -49,7 +49,13 @@ Legend: `[ ]` open · `[x]` done (add date + short note when closing).
 
 ## Medium priority
 
-- [ ] **4. Tampered RP saves can load external images**
+- [x] **4. Tampered RP saves can load external images** ✅ 2026-07-11 —
+  Session validation (the single load-time gate in `isRpgraphSessionV2`) now
+  requires `data:image/` URLs for every entry in `entities.images` and
+  `data:audio/` URLs for timeline voice clips, so foreign sessions with external
+  media addresses are rejected before anything is displayed. Storybook images
+  and voice samples were already scheme-checked in the storybook model. New
+  negative fixtures cover both cases.
   - Files: `src/data-management/validation.ts:265`, `src/components/ChatConversationPanel.tsx:1459`
   - Image addresses from a session are not sufficiently checked; a foreign session
     could call an external address on display and leak IP, time and a unique marker.

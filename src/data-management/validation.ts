@@ -8,6 +8,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Media in a session must be inline data: URLs. Anything else (http, file,
+// blob, ...) could make the app call an external address when the session is
+// displayed, leaking IP, time, and a unique tracking marker.
+function isImageDataUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('data:image/');
+}
+
+function isAudioDataUrl(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('data:audio/');
+}
+
+function isImageEntityRecord(value: unknown) {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.id === 'string' &&
+        typeof entry.name === 'string' &&
+        typeof entry.mimeType === 'string' &&
+        isImageDataUrl(entry.dataUrl),
+    )
+  );
+}
+
 function isTimelineEntry(value: unknown): value is TimelineEntry {
   if (!isRecord(value) || typeof value.id !== 'string') {
     return false;
@@ -52,7 +77,7 @@ function isTimelineEntry(value: unknown): value is TimelineEntry {
         isRecord(clip) &&
         (typeof clip.speakerName === 'string' || clip.speakerName === null) &&
         typeof clip.text === 'string' &&
-        typeof clip.dataUrl === 'string' &&
+        isAudioDataUrl(clip.dataUrl) &&
         (clip.filename === undefined || typeof clip.filename === 'string') &&
         (
           clip.source === undefined ||
@@ -289,6 +314,7 @@ export function isRpgraphSessionV2(value: unknown): value is RpgraphSessionV2 {
     value.timeline.every(isTimelineEntry) &&
     hasValidReplyReferences(value.timeline) &&
     isRecord(value.entities) &&
+    isImageEntityRecord(value.entities.images) &&
     isRecord(value.runtime) &&
     isRecord(value.runtime.current) &&
     isWorkflowVariableRecord(value.runtime.current.workflowVariables) &&
