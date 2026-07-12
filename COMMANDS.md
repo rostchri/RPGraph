@@ -5,7 +5,9 @@ Status: implemented (July 2026). Command definitions live in
 `src/nodes/shared/promptRun.ts`, the editor dialog in
 `src/nodes/shared/PromptTools.tsx` (`PromptCommandModal`), and the default
 workflow prompts use `@command:` tokens. `phone_message` stays inline in the
-Phone output channel (there it is the primary reply, not a command), and the
+Phone output channel (there it is the primary reply, not a command) and in the
+Normal RP channel (there the phoneMessages block is embedded mid-story between
+the prose paragraphs, which a deferred command pass cannot do), and the
 OnlyFriends Post prompt keeps its fan DMs inline because they are a mandatory
 part of that task. This file documents the design.
 
@@ -124,8 +126,10 @@ complete standalone object, valid JSON with double quotes, no markdown fences."
 
 - **Primary name:** `phone_message`
 - **Secondary name:** `send_phone_message`
-- Used as an *extra* block in RP-story and social prompts (in the Phone prompt
-  itself the phone message is the primary reply, not a command).
+- Used as an *extra* block in social DM prompts only. In the Phone prompt the
+  phone message is the primary reply, and in Normal RP prompts the
+  phoneMessages block stays inline because it is embedded mid-story between
+  prose paragraphs.
 - **Suggested condition line (user-authored prompt text):** "`phone_message` — a character texts someone who is not
   present in the scene right now. When characters can simply talk, let them talk
   in the prose instead."
