@@ -3,7 +3,7 @@ export function FileFormatsGuide() {
     <div className="welcome-page-formats">
       <header className="welcome-header">
         <h2>RPGraph Files & Storage Formats</h2>
-        <p>Understand how complete RP saves, reusable workflow files, and standalone Storybooks are stored and loaded.</p>
+        <p>Understand how complete RP saves, reusable workflow files, standalone Storybooks, and Character Cards are stored and loaded.</p>
       </header>
 
       <div className="format-node rp-save-format">
@@ -30,6 +30,26 @@ export function FileFormatsGuide() {
                   </div>
                   <div className="format-node-body">
                     <p className="format-description">Storybook content is embedded in RP Storybook nodes, or saved separately as a Storybook file.</p>
+
+                    <div className="format-node character-cards-format">
+                      <div className="format-node-header">
+                        <span className="format-node-badge">Importable Files</span>
+                        <strong>Character Cards (.json)</strong>
+                      </div>
+                      <div className="format-node-body">
+                        <p className="format-description">Characters can be exported individually and imported into this Storybook.</p>
+                        <div className="character-card-examples">
+                          <div className="format-node character-card-format">
+                            <span className="format-node-badge">Character Card</span>
+                            <strong>Character 1</strong>
+                          </div>
+                          <div className="format-node character-card-format">
+                            <span className="format-node-badge">Character Card</span>
+                            <strong>Character 2</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
                     <div className="format-node opening-history-format">
                       <div className="format-node-header">
@@ -61,11 +81,11 @@ export function FileFormatsGuide() {
       <div className="formats-info-row">
         <div className="info-card">
           <h4>Nesting & Load Flexibility</h4>
-          <p>Storybook files can be opened from the global <strong>Files</strong> menu or loaded inside individual <strong>RP Storybook</strong> nodes on the graph canvas.</p>
+          <p>Storybooks can be opened from <strong>Files</strong>. Exported Character Cards can be imported into any Storybook through the <strong>Characters</strong> picker or its <strong>Open File</strong> action.</p>
         </div>
         <div className="info-card">
           <h4>Encryption & Safety</h4>
-          <p>Workflows, RP saves, and Storybooks can be saved as readable <strong>Plain JSON</strong> or encrypted with a password/PIN. Format and node versions guard against incompatible stored structures.</p>
+          <p>Workflows, RP saves, Storybooks, and Character Cards can be saved as readable <strong>Plain JSON</strong> or encrypted with a password/PIN. Encrypted Character Cards reveal only their character name and format version as character metadata.</p>
         </div>
       </div>
     </div>

@@ -1,3 +1,6 @@
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
 # Commands — deferred JSON reply blocks
 
 Status: implemented (July 2026). Command definitions live in

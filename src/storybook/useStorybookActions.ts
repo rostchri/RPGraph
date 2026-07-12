@@ -12,7 +12,7 @@ import {
   type RpStorybookV1,
 } from '../nodes/rp-storybook-v1/model';
 import { resetCharacterStatsRuntimeData } from '../nodes/character-stats/runtime';
-import type { TurnRecord, WorkflowNode, WorkflowNodeData } from '../types';
+import type { SavedFileSummary, TurnRecord, WorkflowNode, WorkflowNodeData } from '../types';
 import type { SystemLogLevel } from '../types';
 import {
   appointmentEntitiesFromAppointments,
@@ -24,6 +24,13 @@ import { usedStorybookImageIdsRemoved } from './imageUsage';
 import { withChangedStorybookImageDescriptionsSynchronized } from './imageLibrary';
 import { turnsWithStorybookImageRefs } from './openingHistoryRuntime';
 import storybookFormatVersions from './formatVersions.json';
+import {
+  convertLegacyRpStorybook,
+  isLegacyRpStorybookValue,
+  type StorybookConversionResult,
+} from './conversion';
+import { planCharacterCardImport, rpCharacterCardForCharacter } from './characterCard';
+import { storybookWithoutCharacter } from './characterManagement';
 import type { TurnCheckpoint } from '../data-management/types';
 import type {
   ChatGpdChatsByCharacter,
@@ -51,6 +58,8 @@ type SessionPasswordAction =
   | 'load'
   | 'open-file'
   | 'load-storybook'
+  | 'save-character'
+  | 'load-character'
   | null;
 
 type UseStorybookActionsOptions = {
@@ -68,12 +77,17 @@ type UseStorybookActionsOptions = {
   setPendingStorybookLoad: Dispatch<SetStateAction<PendingStorybookLoad>>;
   setPendingSessionFilePath: Dispatch<SetStateAction<string | null>>;
   setSessionPassword: Dispatch<SetStateAction<string>>;
+  sessionPassword: string;
   setFileStorageStatus: Dispatch<SetStateAction<string>>;
   setSessionPasswordAction: Dispatch<SetStateAction<SessionPasswordAction>>;
   setActiveStorybookProtection: Dispatch<SetStateAction<FileProtection>>;
   notifySystem: (level: SystemLogLevel, text: string) => number;
   usedStorybookImageIds: ReadonlySet<string>;
   clearCurrentSession: () => void;
+  requestSaveCharacter: (
+    nodeId: string,
+    characterCard: ReturnType<typeof rpCharacterCardForCharacter>,
+  ) => void;
 };
 
 export function useStorybookActions({
@@ -91,16 +105,38 @@ export function useStorybookActions({
   setPendingStorybookLoad,
   setPendingSessionFilePath,
   setSessionPassword,
+  sessionPassword,
   setFileStorageStatus,
   setSessionPasswordAction,
   setActiveStorybookProtection,
   notifySystem,
   usedStorybookImageIds,
   clearCurrentSession,
+  requestSaveCharacter,
 }: UseStorybookActionsOptions) {
+  const [pendingStorybookConversion, setPendingStorybookConversion] = useState<{
+    nodeId: string;
+    fileName?: string;
+    filePath?: string;
+    sourceValue: unknown;
+    result: StorybookConversionResult;
+    phase: 'convert' | 'review';
+    protection: FileProtection;
+  } | null>(null);
   const [storybookCreatorNodeId, setStorybookCreatorNodeId] = useState<string | null>(null);
   const [storybookCreatorMessages, setStorybookCreatorMessages] = useState<StorybookCreatorMessage[]>([]);
   const [storybookCreatorSubmitting, setStorybookCreatorSubmitting] = useState(false);
+  const [pendingCharacterLoad, setPendingCharacterLoad] = useState<{
+    nodeId: string;
+    filePath?: string;
+    fileName: string;
+    storage?: SavedFileSummary['storage'];
+  } | null>(null);
+  const [showCharacterFiles, setShowCharacterFiles] = useState(false);
+  const [characterFiles, setCharacterFiles] = useState<SavedFileSummary[]>([]);
+  const [selectedCharacterFile, setSelectedCharacterFile] = useState<string | null>(null);
+  const [characterFileStatus, setCharacterFileStatus] = useState('');
+  const [characterImportNodeId, setCharacterImportNodeId] = useState<string | null>(null);
 
   function incompatibleStorybookFileStatus(file: StorybookFileMetadata) {
     if (
@@ -125,9 +161,18 @@ export function useStorybookActions({
     nodeId: string,
     storybook: ReturnType<typeof parseRpStorybookJson>,
     patch: Partial<WorkflowNodeData>,
+    options?: { replaceExisting?: boolean },
   ): string | null {
     const node = nodesRef.current.find((entry) => entry.id === nodeId);
     let committedStorybook = storybook;
+    if (options?.replaceExisting) {
+      clearCurrentSession();
+      updateRuntimeNode(nodeId, {
+        ...patch,
+        storybookJson: rpStorybookJsonText(storybook),
+      });
+      return null;
+    }
     if (node?.data.nodeType === 'rp-storybook-v1') {
       const currentStorybook = node.data.storybookJson
         ? parseRpStorybookJson(node.data.storybookJson)
@@ -165,26 +210,36 @@ export function useStorybookActions({
   }
 
   function updateStorybook(nodeId: string, storybook: ReturnType<typeof parseRpStorybookJson>, status?: string) {
-    return commitStorybookToNode(
+    const commitError = commitStorybookToNode(
       nodeId,
       storybook,
       { storybookStatus: status ?? 'Storybook updated.' },
-    ) === null;
+    );
+    if (commitError) {
+      setStorybookCreatorMessages((current) => [
+        ...current,
+        { role: 'storybook', text: commitError },
+      ]);
+      return false;
+    }
+    return true;
   }
 
   function openStorybookCreator(nodeId: string) {
     setStorybookCreatorNodeId(nodeId);
-    setStorybookCreatorMessages([]);
+    if (pendingStorybookConversion?.nodeId !== nodeId || pendingStorybookConversion.phase !== 'review') {
+      setStorybookCreatorMessages([]);
+    }
   }
 
-  async function submitStorybookCreatorMessage(message: string) {
+  async function submitStorybookCreatorMessage(message: string, visibleMessage = message) {
     const nodeId = storybookCreatorNodeId;
     const node = nodesRef.current.find((entry) => entry.id === nodeId);
     if (!nodeId || !node || node.data.nodeType !== 'rp-storybook-v1') {
       return;
     }
 
-    setStorybookCreatorMessages((current) => [...current, { role: 'user', text: message }]);
+    setStorybookCreatorMessages((current) => [...current, { role: 'user', text: visibleMessage }]);
     setStorybookCreatorSubmitting(true);
     updateRuntimeNode(nodeId, {
       storybookStatus: 'Thinking ...',
@@ -192,22 +247,53 @@ export function useStorybookActions({
     });
 
     try {
-      const currentStorybook = node.data.storybookJson
+      const conversion = pendingStorybookConversion?.nodeId === nodeId && pendingStorybookConversion.phase === 'review'
+        ? pendingStorybookConversion
+        : null;
+      const currentStorybook = conversion?.result.storybook ?? (node.data.storybookJson
         ? parseRpStorybookJson(node.data.storybookJson)
-        : emptyRpStorybookV1;
+        : emptyRpStorybookV1);
+      const conversionStatus = conversion
+        ? [
+            `Conversion review: Storybook ${conversion.result.sourceVersion} -> ${conversion.result.targetVersion}.`,
+            ...conversion.result.rows.map((row) =>
+              `${row.reviewState === 'resolved' || row.reviewState === 'accepted' ? 'GREEN' : row.state === 'suggested' ? 'BLUE' : row.state === 'defaulted' ? 'YELLOW' : 'GREEN'} | ${row.label} | ${row.message}`,
+            ),
+            'During conversion, patches update the conversion draft only. They do not update the active node.',
+          ].join('\n')
+        : '';
+      const storybookMessageContext = storybookCreatorMessages
+        .filter((entry) => entry.role === 'storybook')
+        .slice(-6)
+        .map((entry) => `STORYBOOK NOTICE: ${entry.text}`)
+        .join('\n');
+      const instruction = [conversionStatus, storybookMessageContext, message].filter(Boolean).join('\n\n');
       const currentJson = rpStorybookPromptJsonText(currentStorybook);
       const completion = await nodeLlm.complete({
         connectionId: node.data.connectionId,
         nodeId,
         label: 'Storybook Chat',
-        prompt: rpStorybookEditPrompt(currentJson, message, storyHistoryPresent(currentStorybook)),
+        prompt: rpStorybookEditPrompt(currentJson, instruction, storyHistoryPresent(currentStorybook)),
       });
       const result = parseRpStorybookAssistantResult(completion.text, currentStorybook);
       const changedFields = result.changedFields.slice(0, 4);
+      const storybookChanged = JSON.stringify(result.storybook) !== JSON.stringify(currentStorybook);
       const changedSummary = changedFields.length
         ? `edit ${changedFields.join(' + ')}${result.changedFields.length > changedFields.length ? ' + more' : ''}`
         : 'answer';
-      if (result.changedFields.length) {
+      if (storybookChanged && conversion) {
+        const rows = conversion.result.rows.map((row) => {
+          const rowWasChanged = row.allowedPatchPaths.some((allowed) =>
+            result.patchPaths.some((path) => path === allowed || path.startsWith(`${allowed}/`)),
+          );
+          return rowWasChanged ? { ...row, reviewState: 'resolved' as const, message: 'Reviewed and updated by the AI assistant.' } : row;
+        });
+        setPendingStorybookConversion({
+          ...conversion,
+          result: { ...conversion.result, storybook: result.storybook, rows },
+        });
+        updateRuntimeNode(nodeId, { storybookStatus: `Conversion draft edited via ${completion.connection.label}` });
+      } else if (storybookChanged) {
         const commitError = commitStorybookToNode(nodeId, result.storybook, {
           storybookStatus: `Edited via ${completion.connection.label}`,
         });
@@ -236,20 +322,129 @@ export function useStorybookActions({
     }
   }
 
+  function deleteStorybookCharacter(nodeId: string, characterId: string) {
+    const node = nodesRef.current.find((entry) => entry.id === nodeId);
+    if (!node || node.data.nodeType !== 'rp-storybook-v1') {
+      return;
+    }
+    const storybook = node.data.storybookJson
+      ? parseRpStorybookJson(node.data.storybookJson)
+      : emptyRpStorybookV1;
+    const character = storybook.characters.find((entry) => entry.id === characterId);
+    if (!character) {
+      return;
+    }
+    const commitError = commitStorybookToNode(
+      nodeId,
+      storybookWithoutCharacter(storybook, characterId),
+      { storybookStatus: `Deleted character ${character.name || character.id}.` },
+    );
+    if (commitError) {
+      setStorybookCreatorMessages((current) => [
+        ...current,
+        { role: 'storybook', text: commitError },
+      ]);
+    }
+  }
+
   function applyStorybookToNode(
     nodeId: string,
     storybookValue: unknown,
     fileName?: string,
     filePath?: string,
     status = 'Loaded storybook',
+    protection: FileProtection = 'plain',
   ) {
+    if (isLegacyRpStorybookValue(storybookValue)) {
+      const result = convertLegacyRpStorybook(storybookValue);
+      setStorybookCreatorMessages([]);
+      setPendingStorybookConversion({
+        nodeId,
+        fileName,
+        filePath,
+        sourceValue: storybookValue,
+        result,
+        phase: 'convert',
+        protection,
+      });
+      // The conversion checklist lives in the storybook editor's UI Preview.
+      setStorybookCreatorNodeId(nodeId);
+      updateRuntimeNode(nodeId, {
+        storybookStatus: `Storybook Format ${result.sourceVersion} is older than ${result.targetVersion}. Review the conversion in the storybook editor.`,
+      });
+      return true;
+    }
     const storybook = parseRpStorybookJson(JSON.stringify(storybookValue));
     const commitError = commitStorybookToNode(nodeId, storybook, {
       storybookStatus: fileName ? `${status}: ${fileName}` : status,
       storybookFileName: fileName,
       storybookFilePath: filePath,
-    });
+    }, { replaceExisting: true });
+    if (!commitError) {
+      setActiveStorybookProtection(protection);
+    }
     return commitError === null;
+  }
+
+  function beginPendingStorybookReview() {
+    const pending = pendingStorybookConversion;
+    if (!pending) {
+      return;
+    }
+    const reviewRows = pending.result.rows.filter((row) => row.reviewState === 'pending');
+    setPendingStorybookConversion({ ...pending, phase: 'review' });
+    if (reviewRows.length === 0) {
+      updateRuntimeNode(pending.nodeId, { storybookStatus: 'Conversion draft is ready to apply.' });
+    }
+  }
+
+  async function improvePendingStorybookConversion() {
+    if (pendingStorybookConversion?.phase !== 'review') {
+      return;
+    }
+    await submitStorybookCreatorMessage(
+      [
+        'Review the conversion report and improve every missing or defaulted value that can be inferred meaningfully from the existing storybook.',
+        'Prioritize character banking, social usernames, scenario text, and useful image-generation appearance descriptions.',
+        'Leave technical or binary defaults alone when they cannot be inferred safely, including voice samples, wallpaper ids, LoRA file names, and LoRA URLs.',
+        'Make one coherent patch for all useful improvements, then summarize what you changed and what correctly remains at its default.',
+      ].join(' '),
+      'Improve the useful conversion defaults.',
+    );
+  }
+
+  /** Returns null when applied, otherwise the blocking error message. */
+  function applyPendingStorybookConversion(): string | null {
+    const pending = pendingStorybookConversion;
+    if (!pending || pending.phase !== 'review') {
+      return null;
+    }
+    const { nodeId, fileName, filePath, result, protection } = pending;
+    const commitError = commitStorybookToNode(nodeId, result.storybook, {
+      storybookStatus: `Converted from Storybook Format ${result.sourceVersion} to ${result.targetVersion}${fileName ? `: ${fileName}` : ''}. Save the storybook to keep the upgrade.`,
+      storybookFileName: fileName,
+      storybookFilePath: filePath,
+    }, { replaceExisting: true });
+    if (commitError) {
+      return commitError;
+    }
+    setPendingStorybookConversion(null);
+    setActiveStorybookProtection(protection);
+    const message = `Storybook converted to Format ${result.targetVersion}. Save it as a new file to keep the upgrade.`;
+    setFileStorageStatus(message);
+    notifySystem('info', message);
+    return null;
+  }
+
+  function cancelPendingStorybookConversion() {
+    const pending = pendingStorybookConversion;
+    if (!pending) {
+      return;
+    }
+    updateRuntimeNode(pending.nodeId, {
+      storybookStatus: 'Conversion canceled. The old storybook was not loaded.',
+    });
+    setPendingStorybookConversion(null);
   }
 
   function importCurrentSessionAsOpeningHistory(nodeId: string) {
@@ -411,6 +606,195 @@ export function useStorybookActions({
     });
   }
 
+  async function exportStorybookCharacter(nodeId: string, characterId: string) {
+    const node = nodesRef.current.find((entry) => entry.id === nodeId);
+    if (!node || node.data.nodeType !== 'rp-storybook-v1') {
+      return;
+    }
+    try {
+      const storybook = node.data.storybookJson
+        ? parseRpStorybookJson(node.data.storybookJson)
+        : emptyRpStorybookV1;
+      const character = storybook.characters.find((entry) => entry.id === characterId);
+      if (!character) {
+        updateRuntimeNode(nodeId, { storybookStatus: 'Export failed: character not found.' });
+        return;
+      }
+      requestSaveCharacter(nodeId, rpCharacterCardForCharacter(character));
+    } catch (error) {
+      const messageText = errorMessage(error);
+      updateRuntimeNode(nodeId, { storybookStatus: `Character export failed: ${messageText}` });
+      notifySystem('error', `Character export failed: ${messageText}`);
+    }
+  }
+
+  async function importCharacterCard(nodeId: string) {
+    const node = nodesRef.current.find((entry) => entry.id === nodeId);
+    if (!node || node.data.nodeType !== 'rp-storybook-v1') {
+      return;
+    }
+    try {
+      setCharacterImportNodeId(nodeId);
+      setSelectedCharacterFile(null);
+      setCharacterFileStatus('');
+      setShowCharacterFiles(true);
+      setCharacterFiles(await window.rpgraph.listCharacterFiles());
+    } catch (error) {
+      const messageText = errorMessage(error);
+      setCharacterFileStatus(`Unable to list characters: ${messageText}`);
+    }
+  }
+
+  function closeCharacterFiles() {
+    setShowCharacterFiles(false);
+    setSelectedCharacterFile(null);
+    setCharacterFileStatus('');
+  }
+
+  function cancelCharacterCardUnlock() {
+    setPendingCharacterLoad(null);
+    setShowCharacterFiles(true);
+  }
+
+  async function beginCharacterCardImport(
+    nodeId: string,
+    file: Pick<SavedFileSummary, 'fileName' | 'type' | 'protection' | 'compatible' | 'formatVersion' | 'storage'> & {
+      filePath?: string;
+    },
+  ) {
+    if (file.type !== 'character-card') {
+      setCharacterFileStatus('The selected file is not an RPGraph Character Card.');
+      return;
+    }
+    if (!file.compatible) {
+      setCharacterFileStatus(
+        `Character Card Format ${file.formatVersion ?? 'Unknown'} is incompatible.`,
+      );
+      return;
+    }
+    if (file.protection === 'encrypted') {
+      setPendingCharacterLoad({
+        nodeId,
+        fileName: file.fileName,
+        ...(file.filePath ? { filePath: file.filePath } : {}),
+        ...(file.storage ? { storage: file.storage } : {}),
+      });
+      setPendingSessionFilePath(file.filePath ?? null);
+      setSessionPassword('');
+      setFileStorageStatus('This character card is password protected. Enter its password or PIN to import it.');
+      setShowCharacterFiles(false);
+      setSessionPasswordAction('load-character');
+      return;
+    }
+    const loaded = file.filePath
+      ? await window.rpgraph.loadFilePath(file.filePath)
+      : await window.rpgraph.loadFile(file.fileName, '', file.storage);
+    applyCharacterCardToNode(nodeId, loaded.value, loaded.fileName);
+    closeCharacterFiles();
+  }
+
+  async function importSelectedCharacterCard(file?: SavedFileSummary) {
+    const nodeId = characterImportNodeId;
+    const selected = file ?? characterFiles.find((entry) => entry.fileName === selectedCharacterFile);
+    if (!nodeId || !selected) {
+      setCharacterFileStatus('Select a character first.');
+      return;
+    }
+    try {
+      setSelectedCharacterFile(selected.fileName);
+      setCharacterFileStatus('Importing character ...');
+      await beginCharacterCardImport(nodeId, selected);
+    } catch (error) {
+      const message = `Character import failed: ${errorMessage(error)}`;
+      setCharacterFileStatus(message);
+      updateRuntimeNode(nodeId, { storybookStatus: message });
+      notifySystem('error', message);
+    }
+  }
+
+  async function openExternalCharacterCard() {
+    const nodeId = characterImportNodeId;
+    if (!nodeId) {
+      setCharacterFileStatus('Open the Character importer again.');
+      return;
+    }
+    try {
+      const file = await window.rpgraph.selectCharacterFile();
+      if (file.canceled || !file.filePath || !file.fileName) {
+        return;
+      }
+      await beginCharacterCardImport(nodeId, {
+        fileName: file.fileName,
+        filePath: file.filePath,
+        type: file.type ?? 'unknown',
+        protection: file.protection ?? 'unknown',
+        compatible: file.compatible === true,
+        formatVersion: file.formatVersion,
+      });
+    } catch (error) {
+      const message = `Character import failed: ${errorMessage(error)}`;
+      setCharacterFileStatus(message);
+      updateRuntimeNode(nodeId, { storybookStatus: message });
+      notifySystem('error', message);
+    }
+  }
+
+  function applyCharacterCardToNode(nodeId: string, cardValue: unknown, fileName: string) {
+    const node = nodesRef.current.find((entry) => entry.id === nodeId);
+    if (!node || node.data.nodeType !== 'rp-storybook-v1') {
+      throw new Error('Add an RP Storybook V2 node before importing a character card.');
+    }
+    const currentStorybook = node.data.storybookJson
+      ? parseRpStorybookJson(node.data.storybookJson)
+      : emptyRpStorybookV1;
+    const plan = planCharacterCardImport(cardValue, currentStorybook);
+    const label = plan.character.name || plan.character.id;
+    const action = plan.replacesIndex !== undefined ? 'Replaced' : 'Added';
+    const commitError = commitStorybookToNode(nodeId, plan.storybook, {
+      storybookStatus: `${action} character ${label} from ${fileName}.`,
+    });
+    if (commitError) {
+      throw new Error(commitError);
+    }
+    notifySystem('info', `${action} character ${label} from a character card. Check scenario texts for consistency and save the storybook.`);
+    setStorybookCreatorMessages((current) => [
+      ...current,
+      {
+        role: 'assistant',
+        text: `${action} character ${label} from ${fileName}. Run "Check Story Logic" from the ⋯ menu to align the scenario texts with the new cast, then save the storybook.`,
+      },
+    ]);
+  }
+
+  async function unlockCharacterCard() {
+    const pending = pendingCharacterLoad;
+    if (!pending) {
+      setSessionPasswordAction(null);
+      return;
+    }
+    if (!sessionPassword) {
+      setFileStorageStatus('Enter a password or PIN for the encrypted character card.');
+      return;
+    }
+    try {
+      setFileStorageStatus('Unlocking character card ...');
+      const result = pending.filePath
+        ? await window.rpgraph.loadFilePath(pending.filePath, sessionPassword)
+        : await window.rpgraph.loadFile(pending.fileName, sessionPassword, pending.storage);
+      applyCharacterCardToNode(pending.nodeId, result.value, result.fileName);
+      setPendingCharacterLoad(null);
+      setPendingSessionFilePath(null);
+      setSessionPassword('');
+      setSessionPasswordAction(null);
+      setShowCharacterFiles(false);
+      setFileStorageStatus(`Imported encrypted character: ${result.name}`);
+    } catch (error) {
+      const message = `Character import failed: ${errorMessage(error)}`;
+      updateRuntimeNode(pending.nodeId, { storybookStatus: message });
+      setFileStorageStatus(message);
+    }
+  }
+
   async function importSillyTavernCharacter(nodeId: string) {
     const node = nodesRef.current.find((entry) => entry.id === nodeId);
     if (!node || node.data.nodeType !== 'rp-storybook-v1') {
@@ -437,7 +821,7 @@ export function useStorybookActions({
       const currentJson = rpStorybookPromptJsonText(currentStorybook);
       const importedJson = JSON.stringify(importedCharacter, null, 2);
       const instruction = [
-        `Import this SillyTavern character JSON from "${file.fileName ?? 'selected JSON file'}" into the RPGraph Storybook V1 format.`,
+        `Import this SillyTavern character JSON from "${file.fileName ?? 'selected JSON file'}" into the RPGraph Storybook format.`,
         'Import it as a Storybook character. There is no playable-character/NPC distinction in the Storybook JSON.',
         'Map names, description, personality/persona, scenario/first message/greeting, example dialogue, creator notes, and tags into the closest useful Storybook fields.',
         'Preserve existing Storybook fields unless the import clearly fills an empty value or updates the same imported character.',
@@ -556,10 +940,29 @@ export function useStorybookActions({
     submitStorybookCreatorMessage,
     updateStorybook,
     applyStorybookToNode,
+    pendingStorybookConversion,
+    beginPendingStorybookReview,
+    improvePendingStorybookConversion,
+    applyPendingStorybookConversion,
+    cancelPendingStorybookConversion,
     importCurrentSessionAsOpeningHistory,
     clearStorybookOpeningHistory,
     resetStorybook,
     importSillyTavernCharacter,
+    exportStorybookCharacter,
+    deleteStorybookCharacter,
+    importCharacterCard,
+    showCharacterFiles,
+    characterFiles,
+    selectedCharacterFile,
+    characterFileStatus,
+    setSelectedCharacterFile,
+    closeCharacterFiles,
+    cancelCharacterCardUnlock,
+    importSelectedCharacterCard,
+    openExternalCharacterCard,
+    applyCharacterCardToNode,
+    unlockCharacterCard,
     loadStorybookFile,
   };
 }

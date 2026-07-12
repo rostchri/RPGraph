@@ -12,6 +12,7 @@ import type {
   WorkflowFile,
 } from './types';
 import type { RpStorybookV1 } from './nodes/rp-storybook-v1/model';
+import type { RpCharacterCard } from './storybook/characterCard';
 import type { RpgraphSessionV2 } from './data-management/types';
 
 type SelectedImageFile = {
@@ -90,6 +91,7 @@ declare global {
         onAbort?: (cancel: () => void) => void,
       ) => Promise<LlmCompletionResult>;
       listFiles: () => Promise<SavedFileSummary[]>;
+      listCharacterFiles: () => Promise<SavedFileSummary[]>;
       saveNamedWorkflow: (
         name: string,
         workflow: WorkflowFile,
@@ -124,13 +126,20 @@ declare global {
           protection: 'plain' | 'encrypted';
           password: string;
         }
+        | {
+          kind: 'character';
+          name: string;
+          characterCard: RpCharacterCard;
+          protection: 'plain' | 'encrypted';
+          password: string;
+        }
       ) => Promise<{
         canceled: boolean;
         filePath?: string;
         fileName?: string;
         name?: string;
       }>;
-      loadFile: (fileName: string, password?: string) => Promise<{
+      loadFile: (fileName: string, password?: string, storage?: 'files' | 'characters') => Promise<{
         fileName: string;
         name: string;
         filePath: string;
@@ -159,17 +168,28 @@ declare global {
         latestTurnNumber?: number;
         compatible?: boolean;
       }>;
+      selectCharacterFile: () => Promise<{
+        canceled: boolean;
+        filePath?: string;
+        fileName?: string;
+        name?: string;
+        type?: SavedFileSummary['type'];
+        protection?: SavedFileSummary['protection'];
+        envelopeFormatVersion?: string;
+        formatVersion?: string;
+        compatible?: boolean;
+      }>;
       selectImages: (multiple?: boolean) => Promise<{
         canceled: boolean;
         images: SelectedImageFile[];
       }>;
-      deleteFile: (fileName: string) => Promise<{ fileName: string }>;
+      deleteFile: (fileName: string, storage?: 'files' | 'characters') => Promise<{ fileName: string }>;
       loadTextFile: () => Promise<{
         canceled: boolean;
         fileName?: string;
         contents?: string;
       }>;
-      loadJsonFile: () => Promise<{
+      loadJsonFile: (options?: { title?: string }) => Promise<{
         canceled: boolean;
         fileName?: string;
         contents?: string;
@@ -387,6 +407,13 @@ declare global {
       saveStorybook: (
         name: string,
         storybook: RpStorybookV1,
+        protection: 'plain' | 'encrypted',
+        password: string,
+        overwrite?: boolean,
+      ) => Promise<{ fileName: string; name: string; filePath: string; conflict?: boolean }>;
+      saveCharacter: (
+        name: string,
+        characterCard: RpCharacterCard,
         protection: 'plain' | 'encrypted',
         password: string,
         overwrite?: boolean,

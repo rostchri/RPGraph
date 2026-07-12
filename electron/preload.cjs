@@ -144,19 +144,22 @@ contextBridge.exposeInMainWorld('rpgraph', {
     }
   },
   listFiles: () => ipcRenderer.invoke('file:list'),
+  listCharacterFiles: () => ipcRenderer.invoke('character:list'),
   saveNamedWorkflow: (name, workflow, protection, password, overwrite = false) =>
     ipcRenderer.invoke('workflow:save-named', { name, workflow, protection, password, overwrite }),
   saveRpgraphFileToPath: (request) =>
     ipcRenderer.invoke('file:save-to-path', request),
-  loadFile: (fileName, password = '') =>
-    ipcRenderer.invoke('file:load', { fileName, password }),
+  loadFile: (fileName, password = '', storage = 'files') =>
+    ipcRenderer.invoke('file:load', { fileName, password, storage }),
   loadFilePath: (filePath, password = '') =>
     ipcRenderer.invoke('file:load-file', { filePath, password }),
   selectFile: () => ipcRenderer.invoke('file:select'),
+  selectCharacterFile: () => ipcRenderer.invoke('character:select'),
   selectImages: (multiple = true) => ipcRenderer.invoke('image:select', { multiple }),
-  deleteFile: (fileName) => ipcRenderer.invoke('file:delete', fileName),
+  deleteFile: (fileName, storage = 'files') =>
+    ipcRenderer.invoke('file:delete', { fileName, storage }),
   loadTextFile: () => ipcRenderer.invoke('text-file:load'),
-  loadJsonFile: () => ipcRenderer.invoke('json-file:load'),
+  loadJsonFile: (options) => ipcRenderer.invoke('json-file:load', options),
   loadDefaultWorkflow: () => ipcRenderer.invoke('workflow:load-default'),
   loadStartupWorkflow: () => ipcRenderer.invoke('workflow:load-startup'),
   resolveProjectPath: (relativePath) => ipcRenderer.invoke('app:resolve-project-path', relativePath),
@@ -182,6 +185,8 @@ contextBridge.exposeInMainWorld('rpgraph', {
     ipcRenderer.invoke('session:save', { name, session, protection, password, overwrite }),
   saveStorybook: (name, storybook, protection, password, overwrite = false) =>
     ipcRenderer.invoke('storybook:save', { name, storybook, protection, password, overwrite }),
+  saveCharacter: (name, characterCard, protection, password, overwrite = false) =>
+    ipcRenderer.invoke('character:save', { name, characterCard, protection, password, overwrite }),
   saveCurrentSession: (filePath, session, protection, password) =>
     ipcRenderer.invoke('session:save-current', { filePath, session, protection, password }),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

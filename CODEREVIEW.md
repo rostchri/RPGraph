@@ -1,3 +1,6 @@
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
+Failed to create stream fd: Operation not permitted
 # RPgraph Code Review — To-Do List
 
 Findings from the multi-agent security/quality review. Each item has a checkbox,
@@ -102,6 +105,26 @@ Legend: `[ ]` open · `[✅]` done (add date + short note when closing).
     app is reopened and left via Back.
   - Effort: **Low–Medium** — commit on phone close/unmount as well.
   - Scope: **Small** — phone screen components + PhonePanel.
+
+- [✅] **13. Storybook V2 compatibility and character identity were too permissive** (2026-07-12)
+  Storybook V2 now uses node version `2.0.0`, so workflows containing the V1
+  data shape load the node as incompatible instead of silently normalizing it.
+  Character Card metadata and imports now reject missing identities and refuse
+  ambiguous cards whose id and name match two different existing characters.
+  - Files: `src/nodes/nodeVersion.ts`, `src/storybook/characterCard.ts`, `electron/characterCardFormat.cjs`
+  - Effort: **Low**
+  - Scope: **Small** — node compatibility, default workflow, and card validation.
+
+- [ ] **14. AI conversion improvements are not path-restricted**
+  - Files: `src/storybook/useStorybookActions.ts:270`, `src/storybook/conversion.ts:58`
+  - The conversion report records which missing fields the assistant may improve,
+    but the canned “Improve with AI” action accepts patches to any Storybook path.
+    An unexpected model response could therefore alter already-mapped content in
+    the conversion draft instead of only filling the advertised defaults.
+  - Recommendation: pass an explicit patch allowlist for the canned improvement
+    action and reject operations outside those paths before updating the draft.
+  - Effort: **Medium** — separate canned conversion edits from free-form review chat.
+  - Scope: **Small** — conversion action and assistant patch validation.
 
 ## Low priority
 

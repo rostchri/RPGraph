@@ -182,6 +182,7 @@ type StudioDialogsProps = {
   selectedFile: string | null;
   workflowName: string;
   storybookName: string;
+  characterName: string;
   workflowFormatVersion: string;
   rpSaveFormatVersion: string;
   storybookFormatVersion: string;
@@ -197,8 +198,9 @@ type StudioDialogsProps = {
   onRequestSaveStorybook: () => void;
   onWorkflowNameChange: (name: string) => void;
   onStorybookNameChange: (name: string) => void;
+  onCharacterNameChange: (name: string) => void;
   onRequestSaveSession: () => void;
-  sessionPasswordAction: 'save-workflow' | 'save-session' | 'save-storybook' | 'load' | 'open-file' | 'load-storybook' | null;
+  sessionPasswordAction: 'save-workflow' | 'save-session' | 'save-storybook' | 'save-character' | 'load' | 'open-file' | 'load-storybook' | 'load-character' | null;
   sessionOverwritePending: boolean;
   sessionName: string;
   sessionPassword: string;
@@ -212,6 +214,14 @@ type StudioDialogsProps = {
   onWorkflowSaveScopeChange: (scope: 'workflow' | 'workflow-storybook') => void;
   onChooseSaveLocationChange: (enabled: boolean) => void;
   onSubmitSessionPassword: () => void;
+  showCharacterFiles: boolean;
+  characterFiles: SavedFileSummary[];
+  selectedCharacterFile: string | null;
+  characterFileStatus: string;
+  onCloseCharacterFiles: () => void;
+  onSelectCharacterFile: (file: SavedFileSummary) => void;
+  onImportCharacterFile: (file?: SavedFileSummary) => void;
+  onOpenExternalCharacterFile: () => void;
   showConnections: boolean;
   connections: ConnectionPreset[];
   editingConnection: ConnectionPreset;
@@ -806,6 +816,7 @@ export function StudioDialogs({
   selectedFile,
   workflowName,
   storybookName,
+  characterName,
   workflowFormatVersion,
   rpSaveFormatVersion,
   storybookFormatVersion,
@@ -821,6 +832,7 @@ export function StudioDialogs({
   onRequestSaveStorybook,
   onWorkflowNameChange,
   onStorybookNameChange,
+  onCharacterNameChange,
   onRequestSaveSession,
   sessionPasswordAction,
   sessionOverwritePending,
@@ -836,6 +848,14 @@ export function StudioDialogs({
   onWorkflowSaveScopeChange,
   onChooseSaveLocationChange,
   onSubmitSessionPassword,
+  showCharacterFiles,
+  characterFiles,
+  selectedCharacterFile,
+  characterFileStatus,
+  onCloseCharacterFiles,
+  onSelectCharacterFile,
+  onImportCharacterFile,
+  onOpenExternalCharacterFile,
   showConnections,
   connections,
   editingConnection,
@@ -894,7 +914,7 @@ export function StudioDialogs({
   const [showFileVersionInfo, setShowFileVersionInfo] = useState(false);
   const [activeOptionsTab, setActiveOptionsTab] = useState<OptionsTabId>('chat');
   const [deleteFileCandidate, setDeleteFileCandidate] = useState<SavedFileSummary | null>(null);
-  const [fileFilter, setFileFilter] = useState<'all' | 'workflow' | 'storybook' | 'session'>('all');
+  const [fileFilter, setFileFilter] = useState<'all' | 'workflow' | 'storybook' | 'session' | 'character-card'>('all');
   const [editingWorkflowVariableKey, setEditingWorkflowVariableKey] = useState<string | null>(null);
   const [workflowVariableNameDraft, setWorkflowVariableNameDraft] = useState('');
   const [workflowVariableStatus, setWorkflowVariableStatus] = useState('');
@@ -913,8 +933,9 @@ export function StudioDialogs({
   const isSavingWorkflow = sessionPasswordAction === 'save-workflow';
   const isSavingSession = sessionPasswordAction === 'save-session';
   const isSavingStorybook = sessionPasswordAction === 'save-storybook';
-  const isSavingFile = isSavingWorkflow || isSavingSession || isSavingStorybook;
-  const savingKindLabel = isSavingWorkflow ? 'Workflow' : isSavingStorybook ? 'Storybook' : 'RP';
+  const isSavingCharacter = sessionPasswordAction === 'save-character';
+  const isSavingFile = isSavingWorkflow || isSavingSession || isSavingStorybook || isSavingCharacter;
+  const savingKindLabel = isSavingWorkflow ? 'Workflow' : isSavingStorybook ? 'Storybook' : isSavingCharacter ? 'Character' : 'RP';
   const hasStoredWorkflow = savedFiles.some((file) => file.type === 'workflow');
   const connectionModelOptions = Array.from(
     new Set(
@@ -1321,6 +1342,8 @@ export function StudioDialogs({
       ? 'connections'
       : sessionPasswordAction
         ? 'session-password'
+        : showCharacterFiles
+          ? 'characters'
         : showFiles
           ? 'files'
             : showOptions
@@ -1406,6 +1429,7 @@ export function StudioDialogs({
       }
       if (activeDialog === 'session-password') { onCloseSessionPassword(); return; }
       if (activeDialog === 'connections') { onCloseConnections(); return; }
+      if (activeDialog === 'characters') { onCloseCharacterFiles(); return; }
       if (activeDialog === 'files') { onCloseFiles(); return; }
       if (activeDialog === 'options') { onCloseOptions(); return; }
       if (activeDialog === 'json') { onCloseJson(); return; }
@@ -1449,7 +1473,7 @@ export function StudioDialogs({
   }, [
     activeDialog,
     showFileVersionInfo,
-    onCloseText, onCloseJson, onCloseOptions, onCloseFiles,
+    onCloseText, onCloseJson, onCloseOptions, onCloseFiles, onCloseCharacterFiles,
     onCloseSessionPassword, onCloseConnections,
   ]);
 
@@ -2251,6 +2275,92 @@ export function StudioDialogs({
         </div>
       )}
 
+      {showCharacterFiles && (
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onPointerDown={trackBackdropPointerDown}
+          onClick={(event) => closeFromBackdropClick(event, 'characters', onCloseCharacterFiles)}
+        >
+          <section
+            ref={activeDialog === 'characters' ? activeDialogRef : undefined}
+            className="chat-files-dialog"
+            role="dialog"
+            aria-modal={activeDialog === 'characters'}
+            aria-hidden={activeDialog !== 'characters'}
+            aria-label="RPGraph Characters"
+            tabIndex={-1}
+          >
+            <div className="dialog-header">
+              <div>
+                <h2 className="workflow-dialog-title">Characters</h2>
+                <p>Select a Character Card from your local characters folder</p>
+              </div>
+              <button type="button" className="close-button" onClick={onCloseCharacterFiles}>
+                Close
+              </button>
+            </div>
+            <div className="chat-files-form">
+              <div className="saved-chat-list" aria-label="Saved RPGraph characters">
+                {characterFiles.length === 0 ? (
+                  <p className="empty-chat-list">No saved characters yet.</p>
+                ) : characterFiles.map((file) => (
+                  <div
+                    className={`saved-chat-row${selectedCharacterFile === file.fileName ? ' selected' : ''}`}
+                    key={file.fileName}
+                    onDoubleClick={() => onImportCharacterFile(file)}
+                  >
+                    <button
+                      className="saved-chat-select"
+                      type="button"
+                      onClick={() => onSelectCharacterFile(file)}
+                    >
+                      <span className="saved-file-summary">
+                        <strong className="saved-file-name-container">
+                          <span className="file-type-badge character-card">Character</span>
+                          <span className="saved-file-name-text">{file.name}</span>
+                          {file.protection === 'encrypted' && (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-label="Encrypted"
+                            >
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
+                          )}
+                        </strong>
+                        <small>
+                          {formatFileDate(file.updatedAt)} · v{file.formatVersion ?? 'Unknown'} ·{' '}
+                          {file.protection === 'encrypted' ? 'Encrypted' : 'Plain JSON'}
+                        </small>
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {characterFileStatus && (
+                <p className="chat-storage-status">{characterFileStatus}</p>
+              )}
+            </div>
+            <div className="dialog-actions chat-files-actions">
+              <button type="button" className="secondary" onClick={onOpenExternalCharacterFile}>
+                Open File
+              </button>
+              <button type="button" onClick={() => onImportCharacterFile()}>
+                Import Character
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {showFiles && (
         <div
           className="dialog-backdrop"
@@ -2275,7 +2385,7 @@ export function StudioDialogs({
                     Workflow File Format {workflowFormatVersion} · RP Save Format v{rpSaveFormatVersion} · Storybook Format {storybookFormatVersion}
                   </small>
                 </h2>
-                <p>Open workflow templates, storybooks, or complete sessions</p>
+                <p>Open workflows, Storybooks, Character Cards, or complete sessions</p>
               </div>
               <div className="files-header-actions">
                 <button
@@ -2371,7 +2481,9 @@ export function StudioDialogs({
                                 ? 'Workflow'
                                 : file.type === 'storybook'
                                   ? 'Storybook'
-                                  : 'RP Save'}
+                                  : file.type === 'character-card'
+                                    ? 'Character'
+                                    : 'RP Save'}
                             </span>
                             <span className="saved-file-name-text">{file.name}</span>
                             {file.protection === 'encrypted' && (
@@ -2475,6 +2587,7 @@ export function StudioDialogs({
                     { value: 'workflow', label: 'Workflow' },
                     { value: 'storybook', label: 'Storybook' },
                     { value: 'session', label: 'RP Save' },
+                    { value: 'character-card', label: 'Character' },
                   ]}
                 />
               </div>
@@ -2550,12 +2663,12 @@ export function StudioDialogs({
             role="dialog"
             aria-modal={activeDialog === 'session-password'}
             aria-hidden={activeDialog !== 'session-password'}
-            aria-label={isSavingWorkflow ? 'Save Workflow' : isSavingStorybook ? 'Save Storybook' : isSavingSession ? 'Save RP' : 'Unlock File'}
+            aria-label={isSavingWorkflow ? 'Save Workflow' : isSavingStorybook ? 'Save Storybook' : isSavingCharacter ? 'Export Character' : isSavingSession ? 'Save RP' : 'Unlock File'}
             tabIndex={-1}
           >
             <div className="dialog-header">
               <div>
-                <h2>{isSavingWorkflow ? 'Save Workflow' : isSavingStorybook ? 'Save Storybook' : isSavingSession ? 'Save RP' : 'Unlock File'}</h2>
+                <h2>{isSavingWorkflow ? 'Save Workflow' : isSavingStorybook ? 'Save Storybook' : isSavingCharacter ? 'Export Character' : isSavingSession ? 'Save RP' : 'Unlock File'}</h2>
                 <p>
                   {isSavingFile
                     ? 'Choose how the complete file should be stored'
@@ -2577,6 +2690,8 @@ export function StudioDialogs({
                         ? 'saved workflow contents'
                         : isSavingStorybook
                           ? 'standalone Storybook file'
+                          : isSavingCharacter
+                            ? 'Character Card contents, including images, voice sample, and app setup'
                           : 'RP save, including its workflow, Storybook data, chat history, and runtime state'}.
                     </p>
                   </div>
@@ -2585,17 +2700,19 @@ export function StudioDialogs({
                     <input
                       id="save-file-name"
                       ref={saveFileNameInputRef}
-                      value={isSavingWorkflow ? workflowName : isSavingStorybook ? storybookName : sessionName}
+                      value={isSavingWorkflow ? workflowName : isSavingStorybook ? storybookName : isSavingCharacter ? characterName : sessionName}
                       onChange={(event) => {
                         if (isSavingWorkflow) {
                           onWorkflowNameChange(event.target.value);
                         } else if (isSavingStorybook) {
                           onStorybookNameChange(event.target.value);
+                        } else if (isSavingCharacter) {
+                          onCharacterNameChange(event.target.value);
                         } else {
                           onSessionNameChange(event.target.value);
                         }
                       }}
-                      placeholder={isSavingWorkflow ? 'workflow' : isSavingStorybook ? 'storybook' : 'My roleplay'}
+                      placeholder={isSavingWorkflow ? 'workflow' : isSavingStorybook ? 'storybook' : isSavingCharacter ? 'Character name' : 'My roleplay'}
                     />
                   </label>
                   <div className="file-protection-options" role="radiogroup" aria-label="File protection">
@@ -2699,6 +2816,10 @@ export function StudioDialogs({
                       ? sessionOverwritePending
                         ? 'Overwrite Storybook'
                         : 'Save Storybook'
+                    : isSavingCharacter
+                      ? sessionOverwritePending
+                        ? 'Overwrite Character'
+                        : 'Export Character'
                   : 'Unlock and Open'}
               </button>
             </div>

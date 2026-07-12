@@ -27,6 +27,8 @@ import {
   rpStorybookFormattedTextSettings,
   rpStorybookImageDescriptionPromptSettings,
   rpStorybookImageDescriptionPromptText,
+  rpStorybookLogicCheckInstruction,
+  estimatedRpStorybookPromptTokens,
   rpStorybookPhoneContactAllowed,
   rpStorybookPhoneContactCharacters,
   storybookCharacterImageOwnerIdBase,
@@ -73,6 +75,11 @@ import type {
   WorkflowNode,
 } from '../types';
 import { storybookImageById } from '../storybook/imageLibrary';
+import {
+  StorybookConversionAssistantReport,
+  StorybookConversionPanel,
+} from '../storybook/StorybookConversionPanel';
+import type { StorybookConversionResult } from '../storybook/conversion';
 import { formatContextValue } from '../data-management/formatters';
 import { TextMetricsApi } from '../llm/tokenMetrics';
 import { sanitizeDataUrls, sanitizeDataUrlsInText } from '../utils/sanitize';
@@ -89,7 +96,7 @@ import {
 } from '../workflow';
 
 export type StorybookCreatorMessage = {
-  role: 'user' | 'assistant' | 'error';
+  role: 'user' | 'assistant' | 'storybook' | 'error';
   text: string;
 };
 
@@ -1085,6 +1092,19 @@ type StorybookCreatorDialogProps = {
   onClearOpeningHistory: () => void;
   onResetStorybook: () => void;
   onImportSillyTavernCharacter: () => Promise<void>;
+  onImportCharacterCard: () => Promise<void>;
+  onExportCharacter: (characterId: string) => Promise<void>;
+  onDeleteCharacter: (characterId: string) => void;
+  pendingConversion: {
+    fileName?: string;
+    sourceValue: unknown;
+    result: StorybookConversionResult;
+    phase: 'convert' | 'review';
+  } | null;
+  onBeginConversionReview: () => void;
+  onImproveConversion: () => Promise<void>;
+  onApplyConversion: () => string | null;
+  onCancelConversion: () => void;
   onClose: () => void;
 };
 
@@ -1386,7 +1406,7 @@ function imageStatusText(images: RpStorybookCharacterImage[]) {
     return 'No images';
   }
   const described = images.filter((image) => image.description.trim()).length;
-  return `${images.length} image${images.length === 1 ? '' : 's'}, ${described} described`;
+  return `${images.length} image${images.length === 1 ? '' : 's'} · ${described} described`;
 }
 
 function imageProvenanceLabel(image: RpStorybookCharacterImage) {
@@ -3014,6 +3034,14 @@ export function StorybookCreatorDialog({
   onClearOpeningHistory,
   onResetStorybook,
   onImportSillyTavernCharacter,
+  onImportCharacterCard,
+  onExportCharacter,
+  onDeleteCharacter,
+  pendingConversion,
+  onBeginConversionReview,
+  onImproveConversion,
+  onApplyConversion,
+  onCancelConversion,
   onClose,
 }: StorybookCreatorDialogProps) {
   const [draft, setDraft] = useState('');
@@ -3044,6 +3072,10 @@ export function StorybookCreatorDialog({
       return emptyRpStorybookV1;
     }
   }, [node.data.storybookJson]);
+  const estimatedPromptTokens = useMemo(
+    () => estimatedRpStorybookPromptTokens(pendingConversion?.result.storybook ?? storybook),
+    [pendingConversion, storybook],
+  );
   const formattedTextSettings = rpStorybookFormattedTextSettings(node.data.storybookFormattedTextSettings);
   const phoneContactCharacters = useMemo(() => rpStorybookPhoneContactCharacters(storybook), [storybook]);
   const createImageActions = useMemo(() => usedCreateImagePromptActions(workflowNodes, promptActionSettings), [workflowNodes, promptActionSettings]);
@@ -3246,6 +3278,16 @@ export function StorybookCreatorDialog({
                   <button type="button" role="menuitem" onClick={() => runMoreAction(onImportSillyTavernCharacter)}>
                     Import SillyTavern Character
                   </button>
+                  <button type="button" role="menuitem" onClick={() => runMoreAction(onImportCharacterCard)}>
+                    Import Character Card
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => runMoreAction(() => onSubmit(rpStorybookLogicCheckInstruction))}
+                  >
+                    Check Story Logic
+                  </button>
                 </div>
               )}
             </div>
@@ -3261,7 +3303,12 @@ export function StorybookCreatorDialog({
             {/* Left Column: Document Panel */}
             <div className="storybook-document-panel">
               <div className="storybook-panel-header">
-                <span className="panel-title">Storybook Document</span>
+                <span className="panel-title">
+                  Storybook Document
+                  <span className="storybook-panel-token-estimate">
+                    ~{estimatedPromptTokens.toLocaleString('en-US')} tokens (images excluded)
+                  </span>
+                </span>
                 <div className="storybook-tabs">
                   <button
                     type="button"
@@ -3293,7 +3340,17 @@ export function StorybookCreatorDialog({
                     <JsonSyntaxTextarea
                       id="storybook-json-view"
                       readOnly
-                      value={JSON.stringify(sanitizeDataUrls(storybook), null, 2)}
+                      value={JSON.stringify(
+                        sanitizeDataUrls(
+                          pendingConversion
+                            ? pendingConversion.phase === 'review'
+                              ? pendingConversion.result.storybook
+                              : pendingConversion.sourceValue
+                            : storybook,
+                        ),
+                        null,
+                        2,
+                      )}
                     />
                   </div>
                 )}
@@ -3304,12 +3361,32 @@ export function StorybookCreatorDialog({
                       id="storybook-formatted-text-view"
                       readOnly
                       spellCheck={false}
-                      value={rpStorybookFormattedText(storybook, node.data.storybookFormattedTextSettings)}
+                      value={pendingConversion
+                        ? pendingConversion.phase === 'review'
+                          ? rpStorybookFormattedText(
+                              pendingConversion.result.storybook,
+                              node.data.storybookFormattedTextSettings,
+                            )
+                          : `Storybook Format ${pendingConversion.result.sourceVersion} is not compatible with this build. Convert it in the UI Preview tab first.`
+                        : rpStorybookFormattedText(storybook, node.data.storybookFormattedTextSettings)}
                     />
                   </div>
                 )}
 
-                {viewMode === 'ui' && (
+                {viewMode === 'ui' && pendingConversion && (
+                  <StorybookConversionPanel
+                    fileName={pendingConversion.fileName}
+                    result={pendingConversion.result}
+                    phase={pendingConversion.phase}
+                    isSubmitting={isSubmitting}
+                    onBeginReview={onBeginConversionReview}
+                    onImprove={onImproveConversion}
+                    onApply={onApplyConversion}
+                    onCancel={onCancelConversion}
+                  />
+                )}
+
+                {viewMode === 'ui' && !pendingConversion && (
                   <div className="storybook-ui-view">
                     {/* Header: Title and Introduction */}
                     <div className="storybook-ui-header">
@@ -3351,14 +3428,24 @@ export function StorybookCreatorDialog({
                     <section className="storybook-section actors-section">
                       <div className="section-header">
                         <h4>Charakter</h4>
-                        <button
-                          type="button"
-                          className="contextual-action-button nodrag"
-                          onClick={onImportSillyTavernCharacter}
-                          title="Import SillyTavern Character Card"
-                        >
-                          <span className="button-icon">+</span> SillyTavern Import
-                        </button>
+                        <div className="storybook-section-header-actions">
+                          <button
+                            type="button"
+                            className="contextual-action-button nodrag"
+                            onClick={onImportSillyTavernCharacter}
+                            title="Import SillyTavern Character Card"
+                          >
+                            <span className="button-icon">+</span> SillyTavern Import
+                          </button>
+                          <button
+                            type="button"
+                            className="contextual-action-button nodrag"
+                            onClick={onImportCharacterCard}
+                            title="Import an RPGraph Character Card file"
+                          >
+                            <span className="button-icon">+</span> Import Character
+                          </button>
+                        </div>
                       </div>
                        {storybook.characters.length ? (
                         <div className="storybook-actor-grid">
@@ -3421,28 +3508,58 @@ export function StorybookCreatorDialog({
                                   <span className="field-label">Phone Apps</span>
                                   <p>{characterPhoneSummaryText(character)}</p>
                                 </div>
+                                <div className="character-field character-images-summary-field">
+                                  <span className="field-label">Images</span>
+                                  <p>{imageStatusText(character.images)}</p>
+                                </div>
                               </div>
 
                               <div className="character-card-footer">
+                                <div className="character-card-footer-actions">
+                                  <button
+                                    type="button"
+                                    className={`character-images-button character-comfy-config-button nodrag${comfyStatus.active ? ' configured' : ''}`}
+                                    onClick={() => setComfyConfigCharacterId(character.id)}
+                                  >
+                                    <span>Character Setup</span>
+                                    {comfyStatus.active ? <span aria-hidden="true">✓</span> : null}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="character-images-button nodrag"
+                                    onClick={() => {
+                                      setImageDialogMode('images');
+                                      setImageOwner({ kind: 'character', characterId: character.id });
+                                    }}
+                                  >
+                                    Character Images
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="character-images-button nodrag"
+                                    title={`Export ${character.name || character.id} as an RPGraph Character Card file`}
+                                    onClick={() => void onExportCharacter(character.id)}
+                                  >
+                                    Export Character
+                                  </button>
+                                </div>
                                 <button
                                   type="button"
-                                  className={`character-images-button character-comfy-config-button nodrag${comfyStatus.active ? ' configured' : ''}`}
-                                  onClick={() => setComfyConfigCharacterId(character.id)}
+                                  className="character-delete-button nodrag"
+                                  aria-label={`Delete ${character.name || character.id}`}
+                                  title={`Delete ${character.name || character.id}`}
+                                  onClick={() => askConfirm({
+                                    title: 'Delete Character',
+                                    message: `Delete ${character.name || character.id} from this Storybook? This cannot be undone.`,
+                                    confirmLabel: 'Delete Character',
+                                    danger: true,
+                                    action: () => onDeleteCharacter(character.id),
+                                  })}
                                 >
-                                  <span>Character Setup</span>
-                                  {comfyStatus.active ? <span aria-hidden="true">✓</span> : null}
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6" />
+                                  </svg>
                                 </button>
-                                <button
-                                  type="button"
-                                  className="character-images-button nodrag"
-                                  onClick={() => {
-                                    setImageDialogMode('images');
-                                    setImageOwner({ kind: 'character', characterId: character.id });
-                                  }}
-                                >
-                                  Character Images
-                                </button>
-                                <span className="character-image-summary">{imageStatusText(character.images)}</span>
                               </div>
                             </article>
                           );
@@ -3631,9 +3748,15 @@ export function StorybookCreatorDialog({
                 <span className="panel-title">AI Storybook Assistant</span>
                 <span className="panel-subtitle">Ask the assistant to draft, expand, or refine any part of your storybook.</span>
               </div>
-              
               <div className="storybook-chat-log">
-                {messages.length === 0 ? (
+                {pendingConversion?.phase === 'review' ? (
+                  <StorybookConversionAssistantReport
+                    result={pendingConversion.result}
+                    isSubmitting={isSubmitting}
+                    onImprove={onImproveConversion}
+                  />
+                ) : null}
+                {messages.length === 0 && pendingConversion?.phase !== 'review' ? (
                   <div className="chat-empty-state">
                     <div className="assistant-avatar-large">AI</div>
                     <p className="empty-title">Welcome to Storybook Creator</p>
@@ -3656,7 +3779,11 @@ export function StorybookCreatorDialog({
                   messages.map((message, index) => (
                     <div className={`chat-message-row ${message.role}`} key={`${message.role}-${index}`}>
                       <div className="message-sender-avatar">
-                        {message.role === 'user' ? 'U' : message.role === 'assistant' ? 'AI' : '!'}
+                        {message.role === 'user'
+                          ? 'U'
+                          : message.role === 'assistant'
+                            ? 'AI'
+                            : message.role === 'storybook' ? 'SB' : '!'}
                       </div>
                       <div className="chat-message-bubble">
                         <p>{message.text}</p>
