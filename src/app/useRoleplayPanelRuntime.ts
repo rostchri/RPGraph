@@ -591,7 +591,14 @@ export function useRoleplayPanelRuntime({
         (latestId, transaction) => Math.max(latestId, transaction.message.id),
         0,
       ) ?? 0;
-      const unreadCount = (phoneEntry?.unreadCount ?? 0) + (bankingEntry?.transfers.length ?? 0);
+      const appUnreadCount = Object.values(phoneAppNotifications.get(character.id) ?? {}).reduce(
+        (count, appCount) => count + appCount,
+        0,
+      );
+      const unreadCount =
+        (phoneEntry?.unreadCount ?? 0) +
+        (bankingEntry?.transfers.length ?? 0) +
+        appUnreadCount;
       return unreadCount > 0
         ? [{
             character,
@@ -599,8 +606,11 @@ export function useRoleplayPanelRuntime({
             latestId: Math.max(phoneEntry?.latestId ?? 0, bankingLatestId),
           }]
         : [];
-    }).sort((left, right) => right.latestId - left.latestId),
-    [storyCharacters, unreadBankingByCharacter, unreadPhoneConversations],
+    }).sort((left, right) =>
+      right.unreadCount - left.unreadCount ||
+      right.latestId - left.latestId
+    ),
+    [phoneAppNotifications, storyCharacters, unreadBankingByCharacter, unreadPhoneConversations],
   );
   const viewedPhoneHasNotifications = phoneNotificationOwners.some(
     (entry) => entry.character.id === viewedPhoneCharacter?.id,
@@ -799,8 +809,9 @@ export function useRoleplayPanelRuntime({
 
   function cyclePhoneNotificationOwner() {
     if (chatPanelView !== 'phone') {
-      return;
+      return false;
     }
+    let switchedOwner = false;
     if (phoneNotificationOwners.length > 0) {
       const currentOwnerIndex = phoneNotificationOwners.findIndex(
         (entry) => entry.character.id === viewedPhoneCharacter?.id,
@@ -809,6 +820,7 @@ export function useRoleplayPanelRuntime({
         ? phoneNotificationOwners[(currentOwnerIndex + 1) % phoneNotificationOwners.length]
         : phoneNotificationOwners[0];
       if (nextOwner) {
+        switchedOwner = nextOwner.character.id !== viewedPhoneCharacter?.id;
         if (narratorSelected) {
           setViewedPhoneCharacterId(nextOwner.character.id);
         } else {
@@ -821,6 +833,7 @@ export function useRoleplayPanelRuntime({
 
     setSocialPostOpenRequest(undefined);
     setPhoneHomeRequestId((current) => current + 1);
+    return switchedOwner;
   }
 
   const autoTurnTargetName = selectedCharacter?.name;

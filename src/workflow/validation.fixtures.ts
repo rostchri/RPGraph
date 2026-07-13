@@ -3402,29 +3402,29 @@ export function verifyWorkflowValidationFixtures() {
     throw new Error('Workflow validation fixture failed: default workflow has no input');
   }
   const identicalVersion = hydrateNodeData(
-    { ...inputData, nodeDataVersion: '1.7.0' },
+    { ...inputData, nodeDataVersion: '1.8.1' },
     versionHydrateContext,
   );
   assertFixture(
-    identicalVersion.kind === undefined && identicalVersion.nodeDataVersion === '1.7.0',
+    identicalVersion.kind === undefined && identicalVersion.nodeDataVersion === '1.8.1',
     'an identical core node version must hydrate normally',
   );
   const patchVersion = hydrateNodeData(
-    { ...inputData, nodeDataVersion: '1.7.1' },
+    { ...inputData, nodeDataVersion: '1.8.2' },
     versionHydrateContext,
   );
   assertFixture(
-    patchVersion.kind === undefined && patchVersion.nodeDataVersion === '1.7.0',
+    patchVersion.kind === undefined && patchVersion.nodeDataVersion === '1.8.1',
     'a patch-only core node difference must hydrate normally',
   );
   const minorVersion = hydrateNodeData(
-    { ...inputData, nodeDataVersion: '1.8.0' },
+    { ...inputData, nodeDataVersion: '1.9.0' },
     versionHydrateContext,
   );
   assertFixture(
     minorVersion.kind === 'incompatible-core-node' &&
-      minorVersion.nodeDataVersion === '1.8.0' &&
-      minorVersion.currentNodeVersion === '1.7.0',
+      minorVersion.nodeDataVersion === '1.9.0' &&
+      minorVersion.currentNodeVersion === '1.8.1',
     'a minor core node difference must hydrate as an incompatible placeholder',
   );
   const majorVersion = hydrateNodeData(
@@ -3434,7 +3434,7 @@ export function verifyWorkflowValidationFixtures() {
   assertFixture(
     majorVersion.kind === 'incompatible-core-node' &&
       majorVersion.nodeDataVersion === '2.0.0' &&
-      majorVersion.currentNodeVersion === '1.7.0',
+      majorVersion.currentNodeVersion === '1.8.1',
     'a major core node difference must hydrate as an incompatible placeholder',
   );
 
@@ -3447,7 +3447,7 @@ export function verifyWorkflowValidationFixtures() {
   );
 
   const workflowWithIncompatibleNode = structuredClone(currentWorkflow);
-  workflowWithIncompatibleNode.nodes[0]!.data.nodeDataVersion = '1.8.0';
+  workflowWithIncompatibleNode.nodes[0]!.data.nodeDataVersion = '1.9.0';
   assertFixture(
     isWorkflowFile(workflowWithIncompatibleNode),
     'a workflow with an incompatible core node version must remain loadable',
@@ -3711,6 +3711,13 @@ export function verifyWorkflowValidationFixtures() {
   if (!inputDefinition) {
     throw new Error('Workflow validation fixture failed: input definition is not registered');
   }
+  const outputDefinition = getRegisteredCoreNode('output');
+  assertFixture(
+    outputDefinition?.ports?.({} as WorkflowNode['data']).some((port) =>
+      port.direction === 'input' && port.id === 'autoplay' && port.valueType === 'text'
+    ) === true,
+    'the RP Output definition must expose a dedicated Autoplay text input',
+  );
   assertThrowsFixture(
     () => registerNode(inputDefinition),
     'the registry must reject duplicate node type ids',
@@ -3889,6 +3896,74 @@ async function verifyDirectActionsGraphFixture() {
   assertFixture(
     result === directJson && llmCalls === 0,
     'a direct action must cross the graph without calling an LLM',
+  );
+
+  let auxiliaryDirectActions = 'not evaluated';
+  const autoplayControlText = '[AUTOPLAY]\nPlayer-controlled character: Helga Harper';
+  const normalResult = await executeGraph({
+    outputNodeId: outputNode.id,
+    nodes: [inputNode, outputNode],
+    edges: [
+      {
+        id: 'normal-input-fixture',
+        source: inputNode.id,
+        target: outputNode.id,
+      },
+      {
+        id: 'auxiliary-direct-actions-fixture',
+        source: inputNode.id,
+        sourceHandle: 'direct-actions',
+        target: outputNode.id,
+        targetHandle: 'direct-actions',
+      },
+    ],
+    originalInput: autoplayControlText,
+    originalHistory: '',
+    translatedHistory: '',
+    auxiliaryOutputHandles: ['direct-actions'],
+    onAuxiliaryOutput: (handle, text) => {
+      if (handle === 'direct-actions') {
+        auxiliaryDirectActions = text;
+      }
+    },
+    llm: new NodeLlmApi({
+      resolveConnection: async () => {
+        throw new Error('The Direct Actions filter fixture must not call an LLM.');
+      },
+    }),
+    textMetrics: new TextMetricsApi(4),
+    updateRuntimeNode: () => undefined,
+  });
+  assertFixture(
+    normalResult === autoplayControlText && auxiliaryDirectActions === '',
+    'an Autoplay control block must not be mistaken for Direct Actions JSON',
+  );
+
+  const autoplayText = 'Ryan glances toward the kitchen. "They are still talking in there."';
+  const autoplayResult = await executeGraph({
+    outputNodeId: outputNode.id,
+    outputSourceHandle: 'autoplay',
+    nodes: [inputNode, outputNode],
+    edges: [{
+      id: 'autoplay-output-fixture',
+      source: inputNode.id,
+      target: outputNode.id,
+      targetHandle: 'autoplay',
+    }],
+    originalInput: autoplayText,
+    originalHistory: '',
+    translatedHistory: '',
+    llm: new NodeLlmApi({
+      resolveConnection: async () => {
+        throw new Error('The Autoplay output fixture must not call an LLM.');
+      },
+    }),
+    textMetrics: new TextMetricsApi(4),
+    updateRuntimeNode: () => undefined,
+  });
+  assertFixture(
+    autoplayResult === autoplayText,
+    'the dedicated Autoplay input must preserve plain RP text like Normal RP',
   );
 }
 

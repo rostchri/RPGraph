@@ -27,6 +27,14 @@ import { EventsPanel } from './components/EventsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PhonePanel } from './components/PhonePanel';
 import { useChatGpdPhoneApp } from './chat/useChatGpdPhoneApp';
+import { useAutoplay, type AutoplayRunRequest } from './chat/useAutoplay';
+import { PhoneTab } from './chat/PhoneTab';
+import {
+  autoplayMessageFormat,
+  localActivityPromptSlot,
+  normalRpMessageFormat,
+  socialMediaMessageFormat,
+} from './chat/messageFormats';
 import { PromptPresetOverview } from './components/PromptPresetOverview';
 import { ResourceMonitor } from './components/ResourceMonitor';
 import {
@@ -881,6 +889,8 @@ function App() {
     setDialogueNarratorProviderId,
     dialogueCloneVoiceProviderId,
     setDialogueCloneVoiceProviderId,
+    phoneNotificationSwitchHintSeen,
+    setPhoneNotificationSwitchHintSeen,
   } = useAppSettings();
   const {
     appliedUiScale,
@@ -1065,6 +1075,18 @@ function App() {
     setRunStartTimeMs,
     cancelCurrentRun,
   } = useRunLifecycle();
+  const autoplayGraphRunRef = useRef<((request: AutoplayRunRequest) => Promise<boolean>) | null>(null);
+  const requestAutoplayRun = useCallback(
+    (request: AutoplayRunRequest) => autoplayGraphRunRef.current?.(request) ?? Promise.resolve(false),
+    [],
+  );
+  const autoplay = useAutoplay({
+    isRunning,
+    runAutoplay: requestAutoplayRun,
+    cancelAutoplayRun: () => {
+      cancelCurrentRun('cancel');
+    },
+  });
   const [characterDropdownOpen, setCharacterDropdownOpen] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [textDialogNodeId, setTextDialogNodeId] = useState<string | null>(null);
@@ -4875,6 +4897,8 @@ function App() {
     nodeHasVision,
     checkProviderConnections,
     notifySystem,
+    onRunStarting: autoplay.cancelPendingAutoplay,
+    onRunCommitted: autoplay.onRunCommitted,
     onRpOutputReady:
       dialogueVoiceMode === 'narrator-only' && !englishProcessingEnabled
         ? (text) => { void readTextAsApiNarratorEarly(text); }
@@ -4950,6 +4974,30 @@ function App() {
     activeRunCancelReason: activeRunCancelReasonRef,
   });
 
+  useEffect(() => {
+    autoplayGraphRunRef.current = (request) => runGraph(
+      `[AUTOPLAY]\nPlayer-controlled character: ${request.playerCharacterName}`,
+      [],
+      undefined,
+      messagesRef.current,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      'user',
+      undefined,
+      undefined,
+      undefined,
+      false,
+      autoplayMessageFormat,
+      request.promptSlot,
+    );
+    return () => {
+      autoplayGraphRunRef.current = null;
+    };
+  }, [messagesRef, runGraph]);
+
   function regenerateLastOutput() {
     if (isRunning) {
       const retry = activeRunRef.current?.retry;
@@ -4970,7 +5018,35 @@ function App() {
       turn.mode === 'auto-turn' ||
       turn.input.graphText.includes('[AUTO TURN]') ||
       turn.input.graphText.includes('[AUTO PHONE TURN]');
-    if (turn.messageFormat === 3) {
+    if (turn.directAction) {
+      applyTurnCheckpointRuntime(turn, 'before');
+      void runGraph(
+        turn.input.graphText,
+        inputMessage?.imageAttachments ?? [],
+        undefined,
+        messagesRef.current.filter((message) => !allTurnMessageIds.has(message.id)),
+        replacedMessageIds,
+        turn.mode === 'narrator' ? undefined : selectedCharacter,
+        false,
+        undefined,
+        { turn, replaceInput: false },
+        turn.mode ?? 'user',
+        inputMessage?.eventDisplayText,
+        undefined,
+        undefined,
+        false,
+        turn.messageFormat,
+        turn.promptSlot,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      return;
+    }
+    if (turn.messageFormat === socialMediaMessageFormat) {
       const turnMessages = [...turn.input.messages, ...turn.output.messages];
       const socialPost = turnMessages.find((message) => message.socialPost)?.socialPost;
       const socialThreadAction = turnMessages.find(
@@ -5052,7 +5128,7 @@ function App() {
         undefined,
         undefined,
         false,
-        3,
+        socialMediaMessageFormat,
         promptSlot,
         undefined,
         undefined,
@@ -5064,31 +5140,25 @@ function App() {
       );
       return;
     }
-    if (turn.messageFormat === 2) {
+    if (turn.messageFormat === autoplayMessageFormat) {
       applyTurnCheckpointRuntime(turn, 'before');
       void runGraph(
         turn.input.graphText,
-        inputMessage?.imageAttachments ?? [],
+        [],
         undefined,
         messagesRef.current.filter((message) => !allTurnMessageIds.has(message.id)),
         replacedMessageIds,
-        turn.mode === 'narrator' ? undefined : selectedCharacter,
+        undefined,
         false,
         undefined,
         { turn, replaceInput: false },
-        turn.mode ?? 'user',
-        inputMessage?.eventDisplayText,
+        'user',
+        undefined,
         undefined,
         undefined,
         false,
-        turn.messageFormat,
-        turn.promptSlot,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        turn.directAction,
+        autoplayMessageFormat,
+        turn.promptSlot ?? localActivityPromptSlot,
       );
       return;
     }
@@ -5436,7 +5506,7 @@ function App() {
       undefined,
       undefined,
       false,
-      2,
+      normalRpMessageFormat,
       0,
       undefined,
       undefined,
@@ -5470,7 +5540,7 @@ function App() {
       undefined,
       undefined,
       false,
-      3,
+      socialMediaMessageFormat,
       // Each social app has its own prompt slot: 0 = Fotogram, 1 = OnlyFriends.
       request.post.app === 'fotogram' ? 0 : 1,
       undefined,
@@ -5539,7 +5609,7 @@ function App() {
       undefined,
       undefined,
       false,
-      3,
+      socialMediaMessageFormat,
       // Both thread actions share the app's prompt slot.
       request.action.app === 'fotogram' ? 2 : 3,
       undefined,
@@ -5584,7 +5654,7 @@ function App() {
       undefined,
       undefined,
       false,
-      3,
+      socialMediaMessageFormat,
       message.app === 'fotogram' ? 4 : 5,
       undefined,
       undefined,
@@ -6548,21 +6618,16 @@ function App() {
 	                    <span className="tab-badge">{unreadChatCount}</span>
 	                  )}
 	                </button>
-                <button
-                  className={chatPanelView === 'phone' ? 'active' : ''}
-                  type="button"
-                  role="tab"
-                  aria-selected={chatPanelView === 'phone'}
-                  onClick={selectPhonePanelView}
-                  onDoubleClick={cyclePhoneNotificationOwner}
-                >
-                  Phone
-                  {unreadPhoneNotificationCount > 0 && (
-                    <span className={`tab-badge${viewedPhoneHasNotifications ? '' : ' muted'}`}>
-                      {unreadPhoneNotificationCount}
-                    </span>
-                  )}
-                </button>
+                <PhoneTab
+                  active={chatPanelView === 'phone'}
+                  notificationCount={unreadPhoneNotificationCount}
+                  viewedPhoneHasNotifications={viewedPhoneHasNotifications}
+                  settingsLoadComplete={settingsLoadComplete}
+                  switchHintSeen={phoneNotificationSwitchHintSeen}
+                  onSelect={selectPhonePanelView}
+                  onCycleNotificationOwner={cyclePhoneNotificationOwner}
+                  onSwitchHintSeen={() => setPhoneNotificationSwitchHintSeen(true)}
+                />
                 <button
                   className={chatPanelView === 'events' ? 'active' : ''}
                   type="button"
@@ -6765,6 +6830,17 @@ function App() {
                   (narratorSelected || !!selectedCharacter)
                 )
               }
+              autoplayEnabled={autoplay.enabled}
+              autoplayMode={autoplay.mode}
+              autoplayReplayDisabled={isRunning || (!narratorSelected && !selectedCharacter)}
+              onAutoplayEnabledChange={autoplay.setEnabled}
+              onAutoplayModeChange={autoplay.setMode}
+              onAutoplayRunModeNow={(mode) => autoplay.runModeNow(
+                mode,
+                narratorSelected
+                  ? narratorSpeakerName
+                  : selectedCharacter?.name ?? '',
+              )}
               imageInputRef={imageInputRef}
               chatThreadRef={chatThreadRef}
               onBeginEditMessage={beginEditMessage}

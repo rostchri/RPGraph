@@ -68,9 +68,43 @@ import {
   createdPhoneNoteHistoryText,
   simulatedAiChatHistoryText,
 } from '../chat/phoneAppsSessions';
+import { AutoplayControl } from '../chat/AutoplayControl';
+import type { AutoplayMode } from '../chat/useAutoplay';
 
 const outsidePhoneDisplayModeStorageKey = 'rpgraph-chat-phone-display-mode';
 const phoneBubbleHeadersStorageKey = 'rpgraph-chat-phone-bubble-headers-enabled';
+const composerAutoCollapseStorageKey = 'rpgraph-chat-composer-auto-collapse-enabled';
+
+function isStandaloneEmbeddedPhoneOutput(message: MessageRecord) {
+  const hasNonPhoneText = [
+    message.originalText,
+    message.translatedText,
+    message.embeddedPhoneTextBefore,
+    message.embeddedPhoneTextAfter,
+    message.embeddedPhoneTranslatedTextBefore,
+    message.embeddedPhoneTranslatedTextAfter,
+  ].some((text) => text?.trim());
+  const hasOtherVisibleContent =
+    !!message.imageAttachments?.length ||
+    !!message.outputActionChoices?.length ||
+    !!message.outputActionInfoBoxes?.length ||
+    !!message.outputActionProgressBars?.length ||
+    !!message.outputActionContextCapacityBars?.length ||
+    !!message.bankTransfer ||
+    !!message.socialPost ||
+    !!message.socialThreadAction ||
+    !!message.socialReactions ||
+    !!message.socialDirectMessage ||
+    !!message.createdPhoneNote ||
+    !!message.simulatedAiChat;
+
+  return (
+    message.role === 'output' &&
+    !!message.embeddedPhoneMessages?.length &&
+    !hasNonPhoneText &&
+    !hasOtherVisibleContent
+  );
+}
 
 function phoneReplySizeClass(text: string) {
   if (text.length > 120) {
@@ -143,6 +177,12 @@ type ChatConversationPanelProps = {
   contextualReferenceImageIds: ReadonlySet<string>;
   selectedReferenceImageIds: ReadonlySet<string>;
   canRunChat: boolean;
+  autoplayEnabled: boolean;
+  autoplayMode: AutoplayMode;
+  autoplayReplayDisabled: boolean;
+  onAutoplayEnabledChange: (enabled: boolean) => void;
+  onAutoplayModeChange: (mode: AutoplayMode) => void;
+  onAutoplayRunModeNow: (mode: AutoplayMode) => void;
   imageUploadEnabled?: boolean;
   imageUploadDisabledReason?: string;
   referenceImageContextEnabled?: boolean;
@@ -216,6 +256,12 @@ export function ChatConversationPanel({
   contextualReferenceImageIds,
   selectedReferenceImageIds,
   canRunChat,
+  autoplayEnabled,
+  autoplayMode,
+  autoplayReplayDisabled,
+  onAutoplayEnabledChange,
+  onAutoplayModeChange,
+  onAutoplayRunModeNow,
   imageUploadEnabled = true,
   imageUploadDisabledReason,
   referenceImageContextEnabled = true,
@@ -279,9 +325,9 @@ export function ChatConversationPanel({
   const [expandedPhoneGroups, setExpandedPhoneGroups] = useState<Record<string, boolean>>({});
   const [phoneBubbleHeadersEnabled, setPhoneBubbleHeadersEnabled] = useState(() => {
     try {
-      return window.localStorage.getItem(phoneBubbleHeadersStorageKey) !== 'false';
+      return window.localStorage.getItem(phoneBubbleHeadersStorageKey) === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
   const phoneMessagesById = selectPhoneMessagesById(messages);
@@ -289,6 +335,13 @@ export function ChatConversationPanel({
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isComposerHovered, setIsComposerHovered] = useState(false);
   const [scrollCollapsed, setScrollCollapsed] = useState(false);
+  const [composerAutoCollapseEnabled, setComposerAutoCollapseEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem(composerAutoCollapseStorageKey) !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const composerRef = useRef<HTMLFormElement | null>(null);
   const wheelScrollCollapsePendingRef = useRef(false);
   const wheelScrollCollapseTimerRef = useRef<number | null>(null);
@@ -323,7 +376,7 @@ export function ChatConversationPanel({
 
   useEffect(() => {
     const thread = chatThreadRef.current;
-    if (!thread) return;
+    if (!thread || !composerAutoCollapseEnabled) return;
     const handleWheel = () => {
       wheelScrollCollapsePendingRef.current = true;
       if (wheelScrollCollapseTimerRef.current !== null) {
@@ -352,6 +405,7 @@ export function ChatConversationPanel({
     thread.addEventListener('wheel', handleWheel, { passive: true });
     thread.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
+      wheelScrollCollapsePendingRef.current = false;
       if (wheelScrollCollapseTimerRef.current !== null) {
         window.clearTimeout(wheelScrollCollapseTimerRef.current);
         wheelScrollCollapseTimerRef.current = null;
@@ -359,7 +413,7 @@ export function ChatConversationPanel({
       thread.removeEventListener('wheel', handleWheel);
       thread.removeEventListener('scroll', handleScroll);
     };
-  }, [chatThreadRef]);
+  }, [chatThreadRef, composerAutoCollapseEnabled]);
 
   useEffect(() => {
     const focusFromEnter = (event: KeyboardEvent) => {
@@ -384,6 +438,7 @@ export function ChatConversationPanel({
   }, [chatThreadRef, editingMessageId, focusComposerInput]);
 
   const isExpanded =
+    !composerAutoCollapseEnabled ||
     isComposerFocused ||
     (!scrollCollapsed && draftImages.length > 0);
   const composerModeClass = isExpanded
@@ -424,6 +479,15 @@ export function ChatConversationPanel({
     setPhoneBubbleHeadersEnabled(enabled);
     try {
       window.localStorage.setItem(phoneBubbleHeadersStorageKey, String(enabled));
+    } catch {
+      // Non-critical UI preference.
+    }
+  }
+
+  function changeComposerAutoCollapseEnabled(enabled: boolean) {
+    setComposerAutoCollapseEnabled(enabled);
+    try {
+      window.localStorage.setItem(composerAutoCollapseStorageKey, String(enabled));
     } catch {
       // Non-critical UI preference.
     }
@@ -474,6 +538,18 @@ export function ChatConversationPanel({
           : `direct-phone ${message.role}`,
         ariaLabel: 'Open phone message',
       }]);
+      return;
+    }
+    if (isStandaloneEmbeddedPhoneOutput(message)) {
+      outsidePhoneEntriesByMessageId.set(
+        message.id,
+        message.embeddedPhoneMessages!.map((phoneMessage) => ({
+          phoneMessage,
+          badges: ['AI', 'PHONE'],
+          className: 'embedded-phone output',
+          ariaLabel: 'Open phone message',
+        })),
+      );
       return;
     }
     if (
@@ -1031,7 +1107,9 @@ export function ChatConversationPanel({
               const anchorSender = phoneMessages[0]?.from.trim().toLocaleLowerCase() ?? '';
               return (
                 <section className="chat-phone-bubble-stack embedded" aria-label="Phone messages">
-                  {phoneMessages.map((phoneMessage) => renderPhoneBubble(phoneMessage, anchorSender, true))}
+                  {phoneMessages.map((phoneMessage, messageIndex) =>
+                    renderPhoneBubble(phoneMessage, anchorSender, messageIndex === 0)
+                  )}
                 </section>
               );
             }
@@ -1048,7 +1126,9 @@ export function ChatConversationPanel({
                     >
                       {phoneBubbleHeadersEnabled && segment[0] && phoneConversationCardTitle(segment[0])}
                       <div className="chat-phone-card-messages">
-                        {segment.map((phoneMessage) => renderPhoneBubble(phoneMessage, anchorSender))}
+                        {segment.map((phoneMessage, messageIndex) =>
+                          renderPhoneBubble(phoneMessage, anchorSender, messageIndex === 0)
+                        )}
                       </div>
                     </section>
                   );
@@ -1648,8 +1728,8 @@ export function ChatConversationPanel({
                 className="composer-icon-button"
                 type="button"
                 onClick={() => setOutsidePhoneMenuOpen((open) => !open)}
-                title="Phone message display"
-                aria-label="Phone message display"
+                title="Chat tab settings"
+                aria-label="Chat tab settings"
                 aria-expanded={outsidePhoneMenuOpen}
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -1660,7 +1740,22 @@ export function ChatConversationPanel({
               {outsidePhoneMenuOpen && (
                 <div className="phone-display-popover" role="menu">
                   <div className="phone-display-popover-section">
-                    <span className="phone-display-popover-heading">Phone Message Display</span>
+                    <span className="phone-display-popover-heading">Chat Tab Settings</span>
+                    <button
+                      className={`phone-display-checkbox${composerAutoCollapseEnabled ? ' active' : ''}`}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={composerAutoCollapseEnabled}
+                      onClick={() => changeComposerAutoCollapseEnabled(!composerAutoCollapseEnabled)}
+                    >
+                      <span className="phone-display-check" aria-hidden="true">
+                        {composerAutoCollapseEnabled ? '✓' : ''}
+                      </span>
+                      <span>Auto-collapse input</span>
+                    </button>
+                  </div>
+                  <div className="phone-display-popover-section">
+                    <span className="phone-display-popover-heading">Phone Messages</span>
                     {([
                       ['bubbles', 'Show Phone Messages'],
                       ['hide', 'Hide Phone Messages'],
@@ -1767,17 +1862,27 @@ export function ChatConversationPanel({
               onRequestMessageFocus={() => commandComposerRef.current?.focusMessage()}
             />
           )}
-          <button
-            type="submit"
-            disabled={!canRunChat}
-            title={
-              canRunChat || isRunning
-                ? undefined
-                : 'Add a Storybook with one player and at least one actor to run the chat.'
-            }
-          >
-            {isRunning ? 'Cancel' : 'Run Chat'}
-          </button>
+          <div className="composer-run-actions">
+            <AutoplayControl
+              enabled={autoplayEnabled}
+              mode={autoplayMode}
+              replayDisabled={autoplayReplayDisabled}
+              onEnabledChange={onAutoplayEnabledChange}
+              onModeChange={onAutoplayModeChange}
+              onRunModeNow={onAutoplayRunModeNow}
+            />
+            <button
+              type="submit"
+              disabled={!canRunChat}
+              title={
+                canRunChat || isRunning
+                  ? undefined
+                  : 'Add a Storybook with one player and at least one actor to run the chat.'
+              }
+            >
+              {isRunning ? 'Cancel' : 'Run Chat'}
+            </button>
+          </div>
         </div>
       </form>
       {voicePlaybackDialogOpen && (
