@@ -56,7 +56,7 @@ At a high level, the app works like this:
 6. The runtime resolves connected nodes, calls LLM or utility nodes as needed, and updates runtime node state.
 7. The output is appended back into the chat/session timeline and shown in the UI.
 
-The bundled default workflow is a ready-to-use roleplay graph rather than a minimal three-node example. It currently combines `User Input`, `RP Output`, `Chat History`, `Context Compression`, `Event Manager`, `RP Storybook V2`, an `LLM Prompt Switch`, text combiners, a workflow-variable input, and Wire Links. The Prompt Switch routes Normal RP, Phone Message, and Social Media runs into the matching `RP Output` inputs. It also provides an Autoplay output that can be connected to the dedicated RP Output Autoplay input. The bundled file is the single project-root file matching `workflow.default*.json`; the app imports a newly named default into its managed workflow storage on startup.
+The bundled default workflow is a ready-to-use roleplay graph rather than a minimal three-node example. It currently combines `User Input`, `RP Output`, `Chat History`, `Context Compression`, `Event Manager`, `RP Storybook V2`, an `LLM Prompt Switch`, text combiners, a workflow-variable input, and Wire Links. The Prompt Switch routes Normal RP, Messenger Apps, and Social Media runs into the matching `RP Output` inputs. It also provides an Autoplay output that can be connected to the dedicated RP Output Autoplay input. The bundled file is the single project-root file matching `workflow.default*.json`; the app imports a newly named default into its managed workflow storage on startup.
 
 ## Prompt Routing
 
@@ -64,7 +64,7 @@ The central workflow router is usually the `LLM Prompt Switch`. Chat buttons and
 
 `runGraph` derives two key numbers for each turn:
 
-- **Message Format**: `0` = Normal RP, `1` = Phone Message, `2` = Social Media, `3` = Autoplay.
+- **Message Format**: `0` = Normal RP, `1` = Messenger Apps, `2` = Social Media, `3` = Autoplay.
 - **Turn Mode / Prompt Slot**: `0` = with image, `1` = no image, `2` = AutoTurn, `3` = event, `4` = narrator, `5` = narrator AutoTurn.
 
 Social Media reuses the prompt-slot number for app-specific actions: `0` = Fotogram post, `1` = OnlyFriends post, `2` = Fotogram comment thread, `3` = OnlyFriends comment thread, `4` = Fotogram DM, and `5` = OnlyFriends DM. Autoplay uses slot `0` for Local Activity and slot `1` for Remote Activity.
@@ -92,17 +92,19 @@ This makes actions feel like normal prompt context to the model, while the app c
 
 ## Phone And JSON Outputs
 
-The `RP Output` node has separate inputs for `Normal RP`, `Phone Message`, `Social Media`, `Output Actions`, `Highlighting Context`, and `Direct Actions`. These are final output formats: the model or direct app action has already produced its result, and the app now parses it into chat, phone, social, banking, or UI state.
+The `RP Output` node has separate inputs for `Normal RP`, `Messenger Apps`, `Social Media`, `Output Actions`, `Highlighting Context`, and `Direct Actions`. These are final output formats: the model or direct app action has already produced its result, and the app now parses it into chat, phone, social, banking, or UI state.
 
-The core JSON output is a phone message. The dedicated `Phone Message` input expects one small JSON object with `from`, `to`, `message`, and optional `sendImageId`. RPGraph parses that object, adds it to the Phone tab, links it into the session timeline, and can attach the referenced stored Storybook or phone-history image.
+Private messages share one LLM-facing array shape with `from`, `to`, and `message`. The enclosing key selects the app: `whatsUpApp`, `fotogramApp`, or `onlyFriendsApp`. WhatsUp additionally applies optional `isVoiceMessage` and `sendImageId`; the social apps currently ignore those two fields. Each parsed message becomes a real entry in that app's conversation history.
 
-Normal RP output is mostly prose for the Chat tab, but it can also embed a `phoneMessages` JSON object when a story beat includes texts or calls. Those embedded phone messages are extracted and shown as linked phone activity while the remaining prose stays visible as the chat bubble.
+Before a Prompt Switch output can create a Fotogram or OnlyFriends message, both participants are resolved by exact app handle or display name. Known Storybook characters without an account in that app are blocked, so the model cannot silently invent a missing account for them. Unknown display names and usernames are accepted as new story NPCs and become dynamic social-directory entries after their first delivered message. The node discards an invalid known-character message and retries once with a small private correction context; a second invalid result remains blocked.
+
+Normal RP output is mostly prose for the Chat tab, but it can also embed one of the three messenger-app objects when a story beat includes private messages. Its image and no-image prompts normally send one message, but narrator-style input that directs a back-and-forth may produce a complete two-to-four-message exchange. WhatsUp, Fotogram, and OnlyFriends conversations are shown as app-specific message cards inside the originating chat bubble while the same messages also appear in their app histories. Selecting an embedded message opens its app conversation under the available participant's character view and highlights the linked message.
 
 `Output Actions` is a separate RP Output input for extra app commands. It can create phone messages, chat messages, choice buttons, info boxes, progress bars, context-capacity bars, or controls such as `setTab` and `setPlayer`. Choice buttons can also feed routing values such as `messageFormat` / output channel and `turnMode` / prompt slot back into the next graph run.
 
 `Direct Actions` accepts the same command shapes without requiring an LLM result, plus strictly validated `createdPhoneNotes` and `simulatedAiChats` commit payloads. Banking transfers, manually written Notes, and finished ChatGPD chats all run through this route (via `useDirectAppActions` / `runDirectAppAction`), so each persistent phone-app action becomes a real turn with history, turn trace, undo, and regeneration instead of a silent app-state write.
 
-`Social Media` handles generated Fotogram and OnlyFriends reactions. It applies likes and comments to posts, records thread activity, and can add incoming social DMs. Social DMs use app-specific reply blocks and preserve conversation and optional post/comment origin context.
+`Social Media` handles generated Fotogram and OnlyFriends reactions. It applies likes and comments to posts, records thread activity, and can add incoming private messages through the same messenger-app arrays. Direct replies use the matching `fotogramApp` or `onlyFriendsApp` key.
 
 ## Workflow Graph
 
@@ -147,7 +149,7 @@ WhatsUp supports contact lists, unread conversations, replies, text and voice me
 The app separates the workflow graph from roleplay session data.
 
 - **Workflow**: graph nodes, graph edges, viewport, defaults, and optional bundled storybook data.
-- **Session / RP save**: timeline, messages, entities, runtime state, undo checkpoints, selected UI state, debug state, phone read state, banking contacts, social likes, per-character social connections, discovered NPC social identities, OnlyFriends purchases, and recent emoji state. Phone, banking, social-post, comment, and DM records are stored on the canonical timeline. Bundled social catalogs remain application data and are not duplicated into saves.
+- **Session / RP save**: timeline, messages, entities, runtime state, undo checkpoints, selected UI state, debug state, phone read state, banking contacts, social likes, per-character social connections, discovered NPC social identities, OnlyFriends purchases, and recent emoji state. Phone, banking, social-post, comment, and DM records are stored on the canonical timeline. Chat bubbles retain links to their embedded WhatsUp, Fotogram, and OnlyFriends messages across save and reload. Bundled social catalogs remain application data and are not duplicated into saves.
 - **Storybook**: structured roleplay story data, characters, opening history, images, and formatted context output. Opening History explicitly carries added social connections and dynamic NPC identities so a new session restores the same private social graph.
 
 Current session data uses a `rpgraph-session` format. Workflow data uses a `rpgraph-workflow` format. Storybook has its own version file.
@@ -164,7 +166,7 @@ The chat supports four voice playback modes (speaker dialog in the composer, sto
 
 The ComfyUI voice model stays loaded between clips. It is freed lazily in the Electron main process right before the next local LLM request (plus a short settle delay so the VRAM is released before the LLM loads), and eagerly after a preload or read-aloud queue finishes.
 
-Phone messages support an optional `isVoiceMessage` flag in the LLM JSON (`phoneMessages` array, dedicated Phone Message output, and Output Actions). When the sender has a stored voice sample and a ComfyUI voice provider exists, the Phone tab renders the message as a WhatsApp-style voice bar (`src/components/PhoneVoiceMessage.tsx`) that generates and plays the clip on demand; otherwise the message falls back to plain text. The flag is stored as `phone.voiceMessage` in the session timeline.
+WhatsUp messages support an optional `isVoiceMessage` flag in the LLM JSON (`whatsUpApp` array and Output Actions). When the sender has a stored voice sample and a ComfyUI voice provider exists, the Phone tab renders the message as a WhatsApp-style voice bar (`src/components/PhoneVoiceMessage.tsx`) that generates and plays the clip on demand; otherwise the message falls back to plain text. The flag is stored as `phone.voiceMessage` in the session timeline. Fotogram and OnlyFriends currently ignore voice and image fields in their shared message arrays.
 
 Provider management includes:
 

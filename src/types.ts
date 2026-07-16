@@ -544,6 +544,23 @@ export type EmbeddedPhoneMessageLink = {
   translatedMessage?: string;
 };
 
+export type EmbeddedSocialMessageLink = {
+  socialMessageId: number;
+  app: SocialAppKind;
+  from: string;
+  to: string;
+  message: string;
+  translatedMessage?: string;
+};
+
+export type SocialDirectMessageOpenRequest = {
+  requestId: number;
+  app: SocialAppKind;
+  messageId: string;
+  participantName: string;
+  participantHandle: string;
+};
+
 type OutputActionChoiceOption = {
   id?: string;
   label: string;
@@ -739,6 +756,7 @@ export type MessageRecord = {
   phoneVoiceMessage?: boolean;
   phoneAutoTurnSource?: 'narrator';
   embeddedPhoneMessages?: EmbeddedPhoneMessageLink[];
+  embeddedSocialMessages?: EmbeddedSocialMessageLink[];
   embeddedPhoneTextBefore?: string;
   embeddedPhoneTextAfter?: string;
   embeddedPhoneTranslatedTextBefore?: string;

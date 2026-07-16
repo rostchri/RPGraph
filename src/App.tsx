@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { encode } from '@toon-format/toon';
+import packageMetadata from '../package.json';
 import {
   ImagePreviewDialog,
   CustomNodeAssistantDialog,
@@ -1221,8 +1222,10 @@ function App() {
     unreadPhoneSwitchName,
     openUnreadPhoneConversation,
     openEmbeddedPhoneMessage,
+    openEmbeddedSocialMessage,
     openSocialPost,
     socialPostOpenRequest,
+    socialDirectMessageOpenRequest,
     socialImageById,
     socialLikesByAccount,
     setSocialLikesByAccount,
@@ -6188,7 +6191,7 @@ function App() {
         <div className="brand">
           <h1>
             <span className="brand-name"><span className="brand-name-rp">RP</span>graph Studio</span>
-            <span className="app-version">v0.4.7 Beta</span>
+            <span className="app-version">v{packageMetadata.version} Beta</span>
           </h1>
           <div className="header-brand-actions">
             <button
@@ -6771,6 +6774,7 @@ function App() {
                 setDraftImages((current) => current.filter((entry) => entry.id !== imageId))
               }
               onOpenEmbeddedPhoneMessage={openEmbeddedPhoneMessage}
+              onOpenEmbeddedSocialMessage={openEmbeddedSocialMessage}
               onOpenSocialPost={openSocialPost}
               socialImageById={socialImageById}
               socialLikesByAccount={socialLikesByAccount}
@@ -6810,6 +6814,7 @@ function App() {
               phoneAppNotificationCounts={phoneAppNotificationCounts}
               phoneHomeRequestId={phoneHomeRequestId}
               socialPostOpenRequest={socialPostOpenRequest}
+              socialDirectMessageOpenRequest={socialDirectMessageOpenRequest}
               phoneImages={phoneImages}
               phoneGalleryImages={phoneGalleryImages}
               phoneDraft={phoneDraft}

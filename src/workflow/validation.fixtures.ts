@@ -142,6 +142,7 @@ import {
 import {
   buildSocialDirectory,
   bundledSocialUsers,
+  establishedSocialHandle,
   searchSocialDirectory,
   socialConnectionIds,
   withSocialDirectoryConnectionAdded,
@@ -149,9 +150,15 @@ import {
 } from '../chat/socialDirectory';
 import {
   bundledSocialIdentityContext,
+  isBundledSocialHandle,
   socialHandleFromCatalogIdentity,
   withBundledSocialIdentityContext,
 } from '../chat/socialCatalogs';
+import {
+  resolveSocialMessageIdentity,
+  socialMessageCorrectionContext,
+  validateSocialMessengerAccounts,
+} from '../chat/socialMessageValidation';
 import type { StorybookCharacter, StorybookCreateImageCharacter } from '../storybook/runtime';
 import {
   collectRecentReferenceImages,
@@ -425,20 +432,25 @@ export function verifyWorkflowValidationFixtures() {
   }]);
   const parsedSocialDirectReply = parseSocialDirectMessageOutput(
     [
-      '{"fotogramDirectMessage":{"text":"Yes, message me when you are done!"}}',
-      '{"phoneMessages":[{"from":"Jamie","to":"Alex","message":"Here is my number."}]}',
+      '{"fotogramApp":[{"from":"Jamie","to":"Alex","message":"Yes, message me when you are done!"}]}',
+      '{"whatsUpApp":[{"from":"Jamie","to":"Alex","message":"Here is my number."}]}',
       '{"bankTransfers":[{"from":"Jamie","to":"Alex","amount":20,"note":"For the dress"}]}',
     ].join('\n'),
     socialDirectMessage,
     '2026-06-01T12:31:00.000Z',
   );
   const rejectedSocialDirectReply = parseSocialDirectMessageOutput(
-    '{"onlyFriendsDirectMessage":{"text":"Wrong app key"}}',
+    '{"onlyFriendsApp":[{"from":"Jamie","to":"Alex","message":"Wrong app key"}]}',
     socialDirectMessage,
     '2026-06-01T12:31:00.000Z',
   );
-  const parsedOnlyFriendsTipReply = parseSocialDirectMessageOutput(
-    '{"onlyFriendsDirectMessage":{"text":"You are the best!","tip":10}}',
+  const excessiveSocialDirectReply = parseSocialDirectMessageOutput(
+    '{"fotogramApp":[{"from":"Jamie","to":"Alex","message":"First."},{"from":"Jamie","to":"Alex","message":"Second."}]}',
+    socialDirectMessage,
+    '2026-06-01T12:31:00.000Z',
+  );
+  const parsedOnlyFriendsReply = parseSocialDirectMessageOutput(
+    '{"onlyFriendsApp":[{"from":"Jamie","to":"Alex","message":"You are the best!","tip":10,"isVoiceMessage":true,"sendImageId":"ignored"}]}',
     { ...socialDirectMessage, app: 'onlyfriends' as const },
     '2026-06-01T12:31:00.000Z',
   );
@@ -457,9 +469,14 @@ export function verifyWorkflowValidationFixtures() {
       parsedSocialDirectReply.warnings.length === 0 &&
       rejectedSocialDirectReply.message === undefined &&
       rejectedSocialDirectReply.warnings.some((warning) =>
-        warning.includes('fotogramDirectMessage'),
+        warning.includes('fotogramApp'),
       ) &&
-      parsedOnlyFriendsTipReply.message?.tip === 10 &&
+      excessiveSocialDirectReply.message?.text === 'First.' &&
+      excessiveSocialDirectReply.warnings.some((warning) =>
+        warning.includes('exactly one message'),
+      ) &&
+      parsedOnlyFriendsReply.message?.text === 'You are the best!' &&
+      parsedOnlyFriendsReply.message.tip === 10 &&
       socialMessageHiddenFromChat({
         id: 22,
         role: 'output',
@@ -471,14 +488,14 @@ export function verifyWorkflowValidationFixtures() {
   const parsedReactionsWithDms = parseSocialReactionsOutput(
     [
       '{"reactions":{"postId":"onlyfriends-post-01","likes":30,"comments":[{"from":"Fan","text":"Wow!"}]}}',
-      '{"onlyFriendsDirectMessages":[{"from":"Marcus Vane","text":"Any chance to see more?","postId":"onlyfriends-post-01","tip":5},{"from":"quiet.admirer","text":"You are stunning."}]}',
+      '{"onlyFriendsApp":[{"from":"Marcus Vane","to":"Helga Harper","message":"Any chance to see more?","postId":"onlyfriends-post-01","tip":5.5},{"from":"Quiet Admirer","to":"Helga Harper","message":"You are stunning."}]}',
     ].join('\n'),
     { app: 'onlyfriends', postId: 'onlyfriends-post-01' },
   );
   const parsedFotogramTipIgnored = parseSocialReactionsOutput(
     [
       '{"reactions":{"postId":"fotogram-post-01","likes":10,"comments":[]}}',
-      '{"fotogramDirectMessages":[{"from":"Chloe Whitmore","text":"Long time no see!","tip":5}]}',
+      '{"fotogramApp":[{"from":"Chloe Whitmore","to":"Alex","message":"Long time no see!","postId":"fotogram-post-01","tip":10,"isVoiceMessage":true,"sendImageId":"ignored"}]}',
     ].join('\n'),
     { app: 'fotogram', postId: 'fotogram-post-01' },
   );
@@ -490,12 +507,14 @@ export function verifyWorkflowValidationFixtures() {
     parsedReactionsWithDms.reactions?.likes === 30 &&
       parsedReactionsWithDms.warnings.length === 0 &&
       parsedReactionsWithDms.directMessages.length === 2 &&
-      parsedReactionsWithDms.directMessages[0]?.tip === 5 &&
+      parsedReactionsWithDms.directMessages[0]?.to === 'Helga Harper' &&
+      parsedReactionsWithDms.directMessages[0]?.text === 'Any chance to see more?' &&
       parsedReactionsWithDms.directMessages[0]?.postId === 'onlyfriends-post-01' &&
-      parsedReactionsWithDms.directMessages[1]?.tip === undefined &&
+      parsedReactionsWithDms.directMessages[0]?.tip === 5.5 &&
+      parsedFotogramTipIgnored.directMessages[0]?.postId === 'fotogram-post-01' &&
       parsedFotogramTipIgnored.directMessages[0]?.tip === undefined &&
       parsedCatalogHandle.reactions?.comments[0]?.handle === 'maxpower_official',
-    'social reactions must preserve catalog handles, parse standalone incoming DMs, and keep tips OnlyFriends-only',
+    'social reactions must preserve catalog handles and parse shared messenger-app message blocks',
   );
   const socialPostOriginInput = socialDirectMessageInputText({
     app: 'onlyfriends',
@@ -573,6 +592,81 @@ export function verifyWorkflowValidationFixtures() {
     postId: 'fotogram-post-private-01',
     authorHandle: 'espen.afterdark',
   };
+  const missingOnlyFriendsAccount = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'onlyfriends',
+    identity: '@leo.parker',
+  });
+  const validFotogramName = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'fotogram',
+    identity: 'Espen Harper',
+  });
+  const unknownNpcName = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'onlyfriends',
+    identity: 'Jana Müller',
+  });
+  const bundledHandle = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'onlyfriends',
+    identity: '@violetlane',
+  });
+  const unknownHandle = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'onlyfriends',
+    identity: 'janam98',
+  });
+  const unknownAtHandle = resolveSocialMessageIdentity({
+    characters: privateFotogramCharacters,
+    messages: [],
+    app: 'fotogram',
+    identity: '@haterboy647',
+  });
+  const inventedHandleConversation = validateSocialMessengerAccounts({
+    characters: privateFotogramCharacters,
+    messages: [],
+    text: '{"fotogramApp":[{"from":"haterboy647","to":"Espen Harper","message":"Nice filter.","postId":"fotogram-post-private-01"},{"from":"Espen Harper","to":"haterboy647","message":"Try harder."}]}',
+  });
+  const invalidSocialOutput = validateSocialMessengerAccounts({
+    characters: privateFotogramCharacters,
+    messages: [],
+    text: [
+      'The scene continues.',
+      '```json',
+      '{"onlyFriendsApp":[{"from":"Espen Harper","to":"@leo.parker","message":"Hello"}]}',
+      '```',
+    ].join('\n'),
+  });
+  assertFixture(
+    !missingOnlyFriendsAccount.available &&
+      missingOnlyFriendsAccount.character?.name === 'Leo Parker' &&
+      validFotogramName.available &&
+      validFotogramName.handle === 'espen.afterdark' &&
+      unknownNpcName.available &&
+      unknownNpcName.source === 'new-npc' &&
+      bundledHandle.available &&
+      bundledHandle.handle === 'violetlane' &&
+      unknownHandle.available &&
+      unknownHandle.source === 'new-npc' &&
+      unknownHandle.handle === 'janam98' &&
+      unknownAtHandle.available &&
+      unknownAtHandle.name === 'haterboy647' &&
+      unknownAtHandle.handle === 'haterboy647' &&
+      inventedHandleConversation.issues.length === 0 &&
+      inventedHandleConversation.sanitizedText.includes('fotogram-post-private-01') &&
+      invalidSocialOutput.issues.length === 1 &&
+      invalidSocialOutput.sanitizedText === 'The scene continues.' &&
+      socialMessageCorrectionContext(invalidSocialOutput.issues).includes(
+        'Leo Parker has no OnlyFriends account.',
+      ),
+    'social messages must create unknown NPC usernames but block missing Storybook app accounts',
+  );
   assertFixture(
     findSocialAccountByExactIdentity(
       privateFotogramCharacters,
@@ -642,6 +736,93 @@ export function verifyWorkflowValidationFixtures() {
       },
     }],
   });
+  const establishedHandleMessages: MessageRecord[] = [
+    {
+      id: 21,
+      role: 'output',
+      originalText: 'A social post established an account.',
+      socialPost: {
+        app: 'fotogram',
+        postId: 'fotogram-post-established-handle',
+        author: 'Post Person',
+        authorHandle: 'post.person',
+        caption: 'Hello.',
+      },
+    },
+    {
+      id: 22,
+      role: 'output',
+      originalText: 'A thread established two accounts.',
+      socialThreadAction: {
+        actionId: 'fotogram-thread-established-handles',
+        action: 'comment',
+        app: 'fotogram',
+        postId: 'fotogram-post-established-handle',
+        postAuthor: 'Thread Author',
+        postAuthorHandle: 'thread.author',
+        postCaption: 'Hello.',
+        actor: 'Thread Actor',
+        actorHandle: 'thread.actor',
+        commentText: 'Hi.',
+      },
+    },
+    {
+      id: 23,
+      role: 'output',
+      originalText: 'Comments established their latest account handle.',
+      socialReactions: {
+        app: 'fotogram',
+        postId: 'fotogram-post-established-handle',
+        likes: 0,
+        comments: [
+          { from: 'Reaction Person', handle: 'reaction.old', text: 'First.' },
+          { from: 'Reaction Person', handle: 'reaction.latest', text: 'Second.' },
+        ],
+      },
+    },
+    {
+      id: 24,
+      role: 'output',
+      originalText: 'Jana sent a direct message.',
+      socialDirectMessage: {
+        app: 'fotogram',
+        messageId: 'fotogram-dm-established-handle-1',
+        from: 'Jana Müller',
+        fromHandle: 'jana_m98',
+        to: 'Espen',
+        toHandle: 'espen',
+        text: 'Hello.',
+        sentAt: '2026-07-16T10:00:00.000Z',
+      },
+    },
+    {
+      id: 25,
+      role: 'output',
+      originalText: 'Jana received a direct reply.',
+      socialDirectMessage: {
+        app: 'fotogram',
+        messageId: 'fotogram-dm-established-handle-2',
+        from: 'Espen',
+        fromHandle: 'espen',
+        to: 'Jana Müller',
+        toHandle: 'jana.latest',
+        text: 'Hi.',
+        sentAt: '2026-07-16T10:01:00.000Z',
+      },
+    },
+    {
+      id: 26,
+      role: 'output',
+      originalText: 'Jana uses a separate OnlyFriends account.',
+      socialPost: {
+        app: 'onlyfriends',
+        postId: 'onlyfriends-post-established-handle',
+        author: 'Jana Müller',
+        authorHandle: 'jana.only',
+        caption: 'Hello.',
+      },
+    },
+  ];
   const espenSocialUser = socialDirectory.users.find((user) =>
     user.characterId === 'storybook:character:espen-private'
   );
@@ -668,6 +849,43 @@ export function verifyWorkflowValidationFixtures() {
         'Max Power',
         '@maxpower_official',
       ) === 'maxpower_official' &&
+      isBundledSocialHandle('fotogram', '@LUNA.SKY') &&
+      !isBundledSocialHandle('fotogram', 'not.in.catalog') &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        ' @JANA   MÜLLER ',
+      ) === 'jana.latest' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'onlyfriends',
+        'Jana Müller',
+      ) === 'jana.only' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        'Post Person',
+      ) === 'post.person' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        'Thread Actor',
+      ) === 'thread.actor' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        'Thread Author',
+      ) === 'thread.author' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        'Reaction Person',
+      ) === 'reaction.latest' &&
+      establishedSocialHandle(
+        establishedHandleMessages,
+        'fotogram',
+        'Unknown Person',
+      ) === undefined &&
       bundledSocialUsers
         .filter((user) => user.handles.onlyfriends)
         .every((user) => !bundledFotogramNames.has(user.name.toLowerCase())) &&
@@ -2052,6 +2270,14 @@ export function verifyWorkflowValidationFixtures() {
             to: 'Alice',
             message: 'Ping from Bob',
           }],
+          embeddedSocialMessages: [{
+            socialMessageId: 8,
+            app: 'fotogram',
+            from: 'Bob',
+            to: 'Alice',
+            message: 'I also sent the address on Fotogram.',
+            translatedMessage: 'Ich habe die Adresse auch auf Fotogram geschickt.',
+          }],
           embeddedPhoneTextBefore: 'Bob waves from the bus stop.',
           embeddedPhoneTextAfter: 'Alice pockets her phone.',
           embeddedPhoneTranslatedTextBefore: 'Bob winkt von der Bushaltestelle.',
@@ -2067,6 +2293,25 @@ export function verifyWorkflowValidationFixtures() {
             source: 'dialogue',
             createdAt: '2026-06-01T00:00:00.000Z',
           }],
+        }, {
+          id: 8,
+          role: 'output',
+          originalText: '[Fotogram DM] Bob (@bob) to Alice (@alice): "I also sent the address on Fotogram."',
+          channel: 'rp',
+          socialDirectMessage: {
+            app: 'fotogram',
+            messageId: 'fotogram-dm-incoming-1',
+            from: 'Bob',
+            fromHandle: 'bob',
+            to: 'Alice',
+            toHandle: 'alice',
+            text: 'I also sent the address on Fotogram.',
+            displayText: 'Ich habe die Adresse auch auf Fotogram geschickt.',
+            sentAt: '2026-06-01T12:00:00.000Z',
+          },
+          turnId: 'turn-1',
+          turnNumber: 1,
+          turnPart: 'output',
         }],
       },
   } satisfies TurnRecord;
@@ -2302,13 +2547,20 @@ export function verifyWorkflowValidationFixtures() {
   const embeddedPhoneRoundtripLinkedPhone = restoredAppState.turns[0]?.output.messages.find((message) =>
     message.originalText === 'Ping from Bob',
   );
+  const embeddedSocialRoundtripLinkedMessage = restoredAppState.turns[0]?.output.messages.find((message) =>
+    message.socialDirectMessage?.messageId === 'fotogram-dm-incoming-1',
+  );
   assertFixture(
     embeddedPhoneRoundtripMessage?.embeddedPhoneTextBefore === 'Bob waves from the bus stop.' &&
       embeddedPhoneRoundtripMessage.embeddedPhoneTextAfter === 'Alice pockets her phone.' &&
       embeddedPhoneRoundtripMessage.embeddedPhoneTranslatedTextBefore === 'Bob winkt von der Bushaltestelle.' &&
       embeddedPhoneRoundtripMessage.embeddedPhoneTranslatedTextAfter === 'Alice steckt ihr Handy ein.' &&
-      embeddedPhoneRoundtripMessage.embeddedPhoneMessages?.[0]?.phoneMessageId === embeddedPhoneRoundtripLinkedPhone?.id,
-    'RP Save Format v2 must restore embedded phone composite text and relinked phone ids',
+      embeddedPhoneRoundtripMessage.embeddedPhoneMessages?.[0]?.phoneMessageId === embeddedPhoneRoundtripLinkedPhone?.id &&
+      embeddedPhoneRoundtripMessage.embeddedSocialMessages?.[0]?.socialMessageId ===
+        embeddedSocialRoundtripLinkedMessage?.id &&
+      embeddedPhoneRoundtripMessage.embeddedSocialMessages?.[0]?.translatedMessage ===
+        'Ich habe die Adresse auch auf Fotogram geschickt.',
+    'RP Save Format v2 must restore embedded messenger text and relink phone and social message ids',
   );
   assertFixture(
     embeddedPhoneRoundtripMessage?.voiceClips?.[0]?.dataUrl === 'data:audio/mpeg;base64,QUJD' &&
@@ -2534,6 +2786,39 @@ export function verifyWorkflowValidationFixtures() {
       { id: 12, role: 'error', originalText: 'Hidden error' },
     ]).map((message) => message.id).join(',') === '10',
     'phone selectors must hide linked phone messages and errors from the visible chat timeline',
+  );
+  const embeddedSocialParent = {
+    id: 13,
+    role: 'output',
+    originalText: '',
+    embeddedSocialMessages: [{
+      socialMessageId: 14,
+      app: 'fotogram',
+      from: 'Bob',
+      to: 'Alice',
+      message: 'Sent through Fotogram.',
+    }],
+  } satisfies MessageRecord;
+  const embeddedSocialRecord = {
+    id: 14,
+    role: 'output',
+    originalText: '[Fotogram DM] Bob to Alice: Sent through Fotogram.',
+    socialDirectMessage: {
+      app: 'fotogram',
+      messageId: 'fotogram-dm-fixture',
+      from: 'Bob',
+      fromHandle: 'bob',
+      to: 'Alice',
+      toHandle: 'alice',
+      text: 'Sent through Fotogram.',
+      sentAt: '2026-06-01T12:30:00.000Z',
+    },
+  } satisfies MessageRecord;
+  assertFixture(
+    visibleMessageRecords([embeddedSocialParent, embeddedSocialRecord], {
+      hideMessage: socialMessageHiddenFromChat,
+    }).map((message) => message.id).join(',') === '13',
+    'visible message selectors must retain an otherwise empty RP bubble with embedded social messages',
   );
   const phoneMessagesWithTime = [
     phoneMessages[0]!,
@@ -2981,7 +3266,7 @@ export function verifyWorkflowValidationFixtures() {
     'Lara taps out a reminder.',
     '',
     '```json',
-    '{"phoneMessages":[{"from":"Lara Miller","to":"Robert Miller","message":"Please get the heavy duty ones."}]}',
+    '{"whatsUpApp":[{"from":"Lara Miller","to":"Robert Miller","message":"Please get the heavy duty ones."}]}',
     '```',
   ].join('\n'));
   assertFixture(
@@ -2992,22 +3277,38 @@ export function verifyWorkflowValidationFixtures() {
       fencedEmbeddedPhone.phoneMessages[0]?.message === 'Please get the heavy duty ones.',
     'embedded phone parser must remove markdown fences around phoneMessages JSON',
   );
+  const embeddedPhoneConversation = parseEmbeddedPhoneMessagesFromRpOutput(
+    '{"whatsUpApp":[' +
+      '{"from":"Lara Miller","to":"Robert Miller","message":"Did you get them?"},' +
+      '{"from":"Robert Miller","to":"Lara Miller","message":"Yes, on my way home."}' +
+    ']}',
+  );
+  assertFixture(
+    embeddedPhoneConversation.text === '' &&
+      embeddedPhoneConversation.phoneMessages.length === 2 &&
+      embeddedPhoneConversation.phoneMessages[0]?.message === 'Did you get them?' &&
+      embeddedPhoneConversation.phoneMessages[1]?.message === 'Yes, on my way home.',
+    'embedded phone parser must preserve multi-message conversations in order',
+  );
   assertFixture(
     knownPromptCommandId('SIMULATE_AI_CHAT') === 'simulate_ai_chat' &&
       knownPromptCommandId('Simulate_ChatGPD') === 'simulate_ai_chat' &&
-      knownPromptCommandId('PHONE_CONVERSATION') === 'phone_conversation' &&
+      knownPromptCommandId('MESSENGER_CONVERSATION') === 'messenger_conversation' &&
       defaultPromptCommandInstructionTemplate('simulate_ai_chat').includes('2, 4, 6, or 8 messages') &&
-      defaultPromptCommandInstructionTemplate('phone_conversation').includes('exactly two, three, or four messages') &&
-      defaultPromptCommandInstructionTemplate('phone_conversation').includes(
+      defaultPromptCommandInstructionTemplate('messenger_conversation').includes('exactly two, three, or four messages') &&
+      defaultPromptCommandInstructionTemplate('messenger_conversation').includes(
+        'do not skip that opening message',
+      ) &&
+      defaultPromptCommandInstructionTemplate('messenger_conversation').includes(
         'the first person writes a follow-up, and the other person sends the final reply',
       ) &&
       formatPromptCommandTokens('@command:bank_transfer\n@COMMAND:simulate_chatgpd') ===
         '@command: Bank_transfer\n@command: Simulate_ChatGPD' &&
       replacePromptCommandTokensWithHints('@command: Simulate_ChatGPD') ===
         '[commands: simulate_ai_chat]' &&
-      formatPromptCommandTokens('@command:phone_conversation') === '@command: Phone_conversation' &&
-      replacePromptCommandTokensWithHints('@command: Phone_conversation') ===
-        '[commands: phone_conversation]' &&
+      formatPromptCommandTokens('@command:messenger_conversation') === '@command: Messenger_conversation' &&
+      replacePromptCommandTokensWithHints('@command: Messenger_conversation') ===
+        '[commands: messenger_conversation]' &&
       formatPromptCommandTokens('@command:create_note') === '@command: Create_Note' &&
       replacePromptCommandTokensWithHints('@command: Create_Note') === '[commands: create_note]',
     'prompt commands must accept flexible casing and spacing while preserving their internal command requests',
@@ -3173,15 +3474,16 @@ export function verifyWorkflowValidationFixtures() {
   );
   const embeddedSocialDm = parseEmbeddedPhoneMessagesFromRpOutput([
     'Later that night, her phone buzzes.',
-    '{"onlyFriendsDirectMessages":[{"from":"Marcus Vane","to":"Helga Harper","text":"That set was incredible.","postId":"onlyfriends-post-01","tip":10}]}',
+    '{"onlyFriendsApp":[{"from":"Marcus Vane","to":"Helga Harper","message":"That set was incredible.","postId":"onlyfriends-post-02","tip":7.5,"isVoiceMessage":true,"sendImageId":"ignored"}]}',
   ].join('\n'));
   assertFixture(
     embeddedSocialDm.text === 'Later that night, her phone buzzes.' &&
       embeddedSocialDm.socialDirectMessages[0]?.app === 'onlyfriends' &&
       embeddedSocialDm.socialDirectMessages[0]?.to === 'Helga Harper' &&
-      embeddedSocialDm.socialDirectMessages[0]?.tip === 10 &&
-      embeddedSocialDm.socialDirectMessages[0]?.postId === 'onlyfriends-post-01',
-    'embedded social DM blocks must parse sender, recipient, post reference, and tip',
+      embeddedSocialDm.socialDirectMessages[0]?.text === 'That set was incredible.' &&
+      embeddedSocialDm.socialDirectMessages[0]?.postId === 'onlyfriends-post-02' &&
+      embeddedSocialDm.socialDirectMessages[0]?.tip === 7.5,
+    'embedded social messenger blocks must preserve post context and OnlyFriends tips while ignoring unsupported media fields',
   );
   const rpOutputWithDisplayImage = parseRpOutput([
     'Lara swipes to the cat photo and smiles.',
@@ -4601,6 +4903,87 @@ async function verifyPromptRunFixtures() {
     result.generatedText.startsWith('Espen grins and grabs the phone.') &&
       result.generatedText.includes('"image": "Ryan and Espen share a look at the party."'),
     'a premature after-reply caption call must keep the visible reply and append the image metadata',
+  );
+
+  const socialReplayPrompts: string[] = [];
+  const socialReplayOutputs = [
+    '{"onlyFriendsApp":[{"from":"Espen Harper","to":"@leo.parker","message":"Hello"}]}',
+    'Espen realizes that Leo is not on OnlyFriends and puts the phone away.',
+  ];
+  const socialReplayContext = {
+    nodes: [{
+      id: 'fixture-social-storybook',
+      type: 'workflow',
+      position: { x: 0, y: 0 },
+      data: {
+        nodeType: 'rp-storybook-v1',
+        storybookJson: JSON.stringify({
+          ...emptyRpStorybookV1,
+          characters: [
+            {
+              id: 'espen-harper',
+              name: 'Espen Harper',
+              description: '',
+              personality: '',
+              speechStyle: '',
+              role: '',
+              social: {
+                fotogramUsername: 'espen.afterdark',
+                onlyfriendsUsername: 'espen.private',
+              },
+            },
+            {
+              id: 'leo-parker',
+              name: 'Leo Parker',
+              description: '',
+              personality: '',
+              speechStyle: '',
+              role: '',
+              social: { fotogramUsername: '', onlyfriendsUsername: '' },
+            },
+          ],
+        }),
+      },
+    } as WorkflowNode],
+    edges: [],
+    historyMessages: [],
+    comfyProviderIds: [],
+    providerHealthById: {},
+    retryFormatErrorsEnabled: true,
+    llm: {
+      supportsVision: async () => false,
+      complete: async (request: { prompt: string }) => {
+        socialReplayPrompts.push(request.prompt);
+        return {
+          text: socialReplayOutputs.shift() ?? '',
+          connection: { label: 'Fixture LLM' },
+        };
+      },
+    },
+    reportWarning: (message: string) => warnings.push(message),
+    reportFormatResult: () => {},
+    updateRuntimeData: () => {},
+  } as unknown as ExecuteContext;
+  const socialReplayResult = await runActionAwarePrompt({
+    node,
+    context: socialReplayContext,
+    inputValue: 'Espen wants to contact Leo on OnlyFriends.',
+    images: [],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: 'Write the scene and any social message.',
+    actionConfigs: [],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+  });
+  assertFixture(
+    socialReplayPrompts.length === 2 &&
+      !socialReplayPrompts[0]?.includes('[SOCIAL MESSAGE VALIDATION]') &&
+      socialReplayPrompts[1]?.includes('Leo Parker has no OnlyFriends account.') === true &&
+      socialReplayResult.generatedText ===
+        'Espen realizes that Leo is not on OnlyFriends and puts the phone away.',
+    'invalid social accounts must discard the first output and replay the same prompt once with targeted context',
   );
 
   const runStreamingScenario = async (llmTexts: string[]) => {
