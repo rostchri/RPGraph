@@ -174,6 +174,8 @@ type ChatConversationPanelProps = {
   onChatTextSizeChange: (value: number) => void;
   phoneAuthorBadgesEnabled: boolean;
   onPhoneAuthorBadgesEnabledChange: (enabled: boolean) => void;
+  chatReadsPhoneAppsEnabled: boolean;
+  onChatReadsPhoneAppsEnabledChange: (enabled: boolean) => void;
   thoughtTextStyle: 'bold' | 'italic' | 'light';
   rpDateTimeFormat: RpDateTimeFormat;
   rpWeekdayLanguage: RpWeekdayLanguage;
@@ -254,6 +256,8 @@ export function ChatConversationPanel({
   onChatTextSizeChange,
   phoneAuthorBadgesEnabled,
   onPhoneAuthorBadgesEnabledChange,
+  chatReadsPhoneAppsEnabled,
+  onChatReadsPhoneAppsEnabledChange,
   thoughtTextStyle,
   rpDateTimeFormat,
   rpWeekdayLanguage,
@@ -1867,6 +1871,19 @@ export function ChatConversationPanel({
                         {composerAutoCollapseEnabled ? '✓' : ''}
                       </span>
                       <span>Auto-collapse input</span>
+                    </button>
+                    <button
+                      className={`phone-display-checkbox${chatReadsPhoneAppsEnabled ? ' active' : ''}`}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={chatReadsPhoneAppsEnabled}
+                      title="App messages shown inside a chat bubble are marked read and raise no phone notification."
+                      onClick={() => onChatReadsPhoneAppsEnabledChange(!chatReadsPhoneAppsEnabled)}
+                    >
+                      <span className="phone-display-check" aria-hidden="true">
+                        {chatReadsPhoneAppsEnabled ? '✓' : ''}
+                      </span>
+                      <span>Chat marks app messages read</span>
                     </button>
                   </div>
                   <div className="phone-display-popover-section">

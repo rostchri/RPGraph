@@ -651,6 +651,9 @@ export type BankTransferRecord = {
 
 export type SocialAppKind = 'fotogram' | 'onlyfriends';
 
+/** Unread incoming DM count and tip sum per lowercased partner handle. */
+export type SocialDmUnreadByHandle = Record<string, { count: number; tipTotal: number }>;
+
 /** A direct message sent inside one social app; persisted on the timeline message. */
 export type SocialDirectMessageRecord = {
   app: SocialAppKind;

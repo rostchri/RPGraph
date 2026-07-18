@@ -1250,10 +1250,14 @@ function App() {
     markViewedBankingSeen,
     phoneAppNotificationCounts,
     markViewedPhoneAppSeen,
+    markViewedSocialDmSeen,
+    unreadSocialDirectMessages,
     phoneAppSeenByCharacter,
     setPhoneAppSeenByCharacter,
     phoneAuthorBadgesEnabled,
     changePhoneAuthorBadgesEnabled,
+    chatReadsPhoneAppsEnabled,
+    changeChatReadsPhoneAppsEnabled,
     autoTurnDisabled,
     autoTurnTitle,
     switchPlayerDisabled,
@@ -6732,6 +6736,8 @@ function App() {
               onChatTextSizeChange={setChatTextSize}
               phoneAuthorBadgesEnabled={phoneAuthorBadgesEnabled}
               onPhoneAuthorBadgesEnabledChange={changePhoneAuthorBadgesEnabled}
+              chatReadsPhoneAppsEnabled={chatReadsPhoneAppsEnabled}
+              onChatReadsPhoneAppsEnabledChange={changeChatReadsPhoneAppsEnabled}
               thoughtTextStyle={thoughtTextStyle}
               rpDateTimeFormat={rpDateTimeFormat}
               rpWeekdayLanguage={rpWeekdayLanguage}
@@ -6873,6 +6879,8 @@ function App() {
               onMarkSelectedPhoneConversationSeen={markSelectedPhoneConversationSeen}
               onMarkBankingSeen={markViewedBankingSeen}
               onMarkPhoneAppSeen={markViewedPhoneAppSeen}
+              onMarkSocialDirectMessagesSeen={markViewedSocialDmSeen}
+              unreadSocialDirectMessages={unreadSocialDirectMessages}
               onOpenUnreadPhoneConversation={openUnreadPhoneConversation}
               unreadPhoneSwitchName={unreadPhoneSwitchName}
               onSwitchToViewedCharacter={() => {

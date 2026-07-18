@@ -2787,6 +2787,21 @@ export function verifyWorkflowValidationFixtures() {
       !viewerHasUnreadPhoneMessages(phoneInfo, 'Bob'),
     'phone selectors must derive loaded seen state and viewer unread state',
   );
+  const exchangeMessages = [10, 11, 12, 13].map((id) => ({
+    id,
+    role: 'output',
+    originalText: `Exchange ${id}`,
+    channel: 'phone',
+    phoneFrom: id % 2 === 0 ? 'Alice' : 'Bob',
+    phoneTo: id % 2 === 0 ? 'Bob' : 'Alice',
+  })) satisfies MessageRecord[];
+  const exchangeInfo = phoneConversationInfoFromMessages(exchangeMessages, {});
+  assertFixture(
+    exchangeInfo.get(aliceBobKey)?.unreadCount === 1 &&
+      exchangeInfo.get(aliceBobKey)?.unreadByRecipient.alice?.unreadCount === 1 &&
+      !exchangeInfo.get(aliceBobKey)?.unreadByRecipient.bob,
+    'phone replies must implicitly mark earlier conversation messages as read',
+  );
   assertFixture(
     directPhoneTimelineEntries(phoneMessages)[0]?.phoneMessage.from === 'Alice' &&
       linkedPhoneMessageIds([{ ...phoneMessages[0]!, embeddedPhoneMessages: [{ phoneMessageId: 11, from: 'Bob', to: 'Alice', message: 'Pong' }] }]).has(11),

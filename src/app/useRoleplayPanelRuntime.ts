@@ -79,6 +79,7 @@ import type {
   MessageRecord,
   SocialAppKind,
   SocialDirectMessageOpenRequest,
+  SocialDmUnreadByHandle,
   SocialPostRecord,
   TurnRecord,
   WorkflowNode,
@@ -88,6 +89,7 @@ import type {
 export type ChatPanelView = 'chat' | 'phone' | 'events';
 
 const phoneAuthorBadgesStorageKey = 'rpgraph-phone-author-badges-enabled';
+const chatReadsPhoneAppsStorageKey = 'rpgraph-chat-reads-phone-apps-enabled';
 const chatAutoFollowBottomMargin = 48;
 
 type UseRoleplayPanelRuntimeOptions = {
@@ -157,6 +159,13 @@ export function useRoleplayPanelRuntime({
       return window.localStorage.getItem(phoneAuthorBadgesStorageKey) === 'true';
     } catch {
       return false;
+    }
+  });
+  const [chatReadsPhoneAppsEnabled, setChatReadsPhoneAppsEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem(chatReadsPhoneAppsStorageKey) !== 'false';
+    } catch {
+      return true;
     }
   });
   const [highlightedPhoneMessage, setHighlightedPhoneMessage] = useState<{
@@ -277,7 +286,18 @@ export function useRoleplayPanelRuntime({
     : 0;
 
   const phoneAppNotifications = useMemo(() => {
-    const byCharacter = new Map<string, Record<'notes' | 'ai' | 'fotogram' | 'onlyfriends', number>>();
+    const byCharacter = new Map<string, {
+      counts: Record<'notes' | 'ai' | 'fotogram' | 'onlyfriends', number>;
+      unreadDirectMessages: Record<'fotogram' | 'onlyfriends', SocialDmUnreadByHandle>;
+    }>();
+    // DMs rendered as embedded app blocks inside a chat bubble were already
+    // read there, so they produce no app notification while the option is on.
+    const chatEmbeddedSocialIds = new Set(
+      chatReadsPhoneAppsEnabled
+        ? messages.flatMap((message) =>
+            message.embeddedSocialMessages?.map((link) => link.socialMessageId) ?? [])
+        : [],
+    );
     storyCharacters.forEach((character) => {
       const seen = (app: string) => phoneAppSeenByCharacter[`${character.id}:${app}`] ?? 0;
       const count = (app: string, matches: (message: MessageRecord) => boolean) =>
@@ -285,29 +305,71 @@ export function useRoleplayPanelRuntime({
       const ownedPostIds = new Set(messages.flatMap((message) =>
         message.socialPost?.author === character.name ? [message.socialPost.postId] : []
       ));
+      // One badge per unread DM conversation and per post with unread
+      // reactions, instead of one badge per message. DM conversations keep
+      // their own seen id (marked when the thread is opened, like phone
+      // conversations); reactions clear with the app-level seen id.
+      const socialApp = (app: 'fotogram' | 'onlyfriends') => {
+        const unreadDms: SocialDmUnreadByHandle = {};
+        messages.forEach((message) => {
+          const directMessage = message.socialDirectMessage;
+          if (
+            message.isOpening ||
+            directMessage?.app !== app ||
+            directMessage.to !== character.name ||
+            chatEmbeddedSocialIds.has(message.id)
+          ) {
+            return;
+          }
+          const handleKey = directMessage.fromHandle.toLowerCase();
+          const dmSeen = phoneAppSeenByCharacter[`${character.id}:${app}:dm:${handleKey}`] ?? 0;
+          if (message.id <= dmSeen) {
+            return;
+          }
+          const existing = unreadDms[handleKey] ?? { count: 0, tipTotal: 0 };
+          unreadDms[handleKey] = {
+            count: existing.count + 1,
+            tipTotal: existing.tipTotal + (directMessage.tip ?? 0),
+          };
+        });
+        const reactionPostIds = new Set(messages.flatMap((message) =>
+          !message.isOpening &&
+          message.id > seen(app) &&
+          message.socialReactions?.app === app &&
+          ownedPostIds.has(message.socialReactions.postId)
+            ? [message.socialReactions.postId]
+            : []
+        ));
+        return {
+          count: Object.keys(unreadDms).length + reactionPostIds.size,
+          unreadDms,
+        };
+      };
+      const fotogram = socialApp('fotogram');
+      const onlyfriends = socialApp('onlyfriends');
       byCharacter.set(character.id, {
-        notes: count('notes', (message) => message.createdPhoneNote?.characterId === character.id),
-        ai: count('ai', (message) => message.simulatedAiChat?.characterId === character.id),
-        fotogram: count('fotogram', (message) => (
-          message.socialReactions?.app === 'fotogram' && ownedPostIds.has(message.socialReactions.postId)
-        ) || (
-          message.socialDirectMessage?.app === 'fotogram' && message.socialDirectMessage.to === character.name
-        )),
-        onlyfriends: count('onlyfriends', (message) => (
-          message.socialReactions?.app === 'onlyfriends' && ownedPostIds.has(message.socialReactions.postId)
-        ) || (
-          message.socialDirectMessage?.app === 'onlyfriends' && message.socialDirectMessage.to === character.name
-        )),
+        counts: {
+          notes: count('notes', (message) => message.createdPhoneNote?.characterId === character.id),
+          ai: count('ai', (message) => message.simulatedAiChat?.characterId === character.id),
+          fotogram: fotogram.count,
+          onlyfriends: onlyfriends.count,
+        },
+        unreadDirectMessages: {
+          fotogram: fotogram.unreadDms,
+          onlyfriends: onlyfriends.unreadDms,
+        },
       });
     });
     return byCharacter;
-  }, [messages, phoneAppSeenByCharacter, storyCharacters]);
-  const phoneAppNotificationCounts = phoneAppNotifications.get(viewedPhoneCharacter?.id ?? '') ?? {
+  }, [chatReadsPhoneAppsEnabled, messages, phoneAppSeenByCharacter, storyCharacters]);
+  const phoneAppNotificationCounts = phoneAppNotifications.get(viewedPhoneCharacter?.id ?? '')?.counts ?? {
     notes: 0,
     ai: 0,
     fotogram: 0,
     onlyfriends: 0,
   };
+  const unreadSocialDirectMessages = phoneAppNotifications.get(viewedPhoneCharacter?.id ?? '')
+    ?.unreadDirectMessages ?? { fotogram: {}, onlyfriends: {} };
 
   const markViewedPhoneAppSeen = useCallback((app: 'notes' | 'ai' | 'fotogram' | 'onlyfriends') => {
     if (!viewedPhoneCharacter) {
@@ -315,6 +377,17 @@ export function useRoleplayPanelRuntime({
     }
     const latestId = messages.reduce((highest, message) => Math.max(highest, message.id), 0);
     const key = `${viewedPhoneCharacter.id}:${app}`;
+    setPhoneAppSeenByCharacter((current) =>
+      latestId > (current[key] ?? 0) ? { ...current, [key]: latestId } : current
+    );
+  }, [messages, viewedPhoneCharacter]);
+
+  const markViewedSocialDmSeen = useCallback((app: SocialAppKind, partnerHandle: string) => {
+    if (!viewedPhoneCharacter) {
+      return;
+    }
+    const latestId = messages.reduce((highest, message) => Math.max(highest, message.id), 0);
+    const key = `${viewedPhoneCharacter.id}:${app}:dm:${partnerHandle.toLowerCase()}`;
     setPhoneAppSeenByCharacter((current) =>
       latestId > (current[key] ?? 0) ? { ...current, [key]: latestId } : current
     );
@@ -628,7 +701,7 @@ export function useRoleplayPanelRuntime({
     0,
   );
   const unreadPhoneAppCount = Array.from(phoneAppNotifications.values()).reduce(
-    (total, counts) => total + Object.values(counts).reduce((sum, count) => sum + count, 0),
+    (total, entry) => total + Object.values(entry.counts).reduce((sum, count) => sum + count, 0),
     0,
   );
   const unreadPhoneNotificationCount = unreadPhoneCount + unreadBankingTotalCount + unreadPhoneAppCount;
@@ -646,7 +719,7 @@ export function useRoleplayPanelRuntime({
         (latestId, transaction) => Math.max(latestId, transaction.message.id),
         0,
       ) ?? 0;
-      const appUnreadCount = Object.values(phoneAppNotifications.get(character.id) ?? {}).reduce(
+      const appUnreadCount = Object.values(phoneAppNotifications.get(character.id)?.counts ?? {}).reduce(
         (count, appCount) => count + appCount,
         0,
       );
@@ -859,6 +932,15 @@ export function useRoleplayPanelRuntime({
     setPhoneAuthorBadgesEnabled(enabled);
     try {
       window.localStorage.setItem(phoneAuthorBadgesStorageKey, String(enabled));
+    } catch {
+      // Non-critical UI preference.
+    }
+  }
+
+  function changeChatReadsPhoneAppsEnabled(enabled: boolean) {
+    setChatReadsPhoneAppsEnabled(enabled);
+    try {
+      window.localStorage.setItem(chatReadsPhoneAppsStorageKey, String(enabled));
     } catch {
       // Non-critical UI preference.
     }
@@ -1294,10 +1376,14 @@ export function useRoleplayPanelRuntime({
     markViewedBankingSeen,
     phoneAppNotificationCounts,
     markViewedPhoneAppSeen,
+    markViewedSocialDmSeen,
+    unreadSocialDirectMessages,
     phoneAppSeenByCharacter,
     setPhoneAppSeenByCharacter,
     phoneAuthorBadgesEnabled,
     changePhoneAuthorBadgesEnabled,
+    chatReadsPhoneAppsEnabled,
+    changeChatReadsPhoneAppsEnabled,
     autoTurnDisabled,
     autoTurnTitle,
     switchPlayerDisabled,
