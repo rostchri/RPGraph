@@ -291,7 +291,10 @@ type WorkflowNodeCommonFields = {
   currentNodeVersion?: NodeVersion;
   portsSnapshot?: PortSnapshot[];
   runActive?: boolean;
+  runActiveStartedAtMs?: number;
   runVisionActive?: boolean;
+  llmActiveCallLabel?: string;
+  llmActiveCallStartedAtMs?: number;
   runCompleted?: boolean;
   runPrepared?: boolean;
   runError?: string;
@@ -542,6 +545,8 @@ export type EmbeddedPhoneMessageLink = {
   to: string;
   message: string;
   translatedMessage?: string;
+  /** Position among all messenger entries of the RP output, in source order. */
+  sourceOrder?: number;
 };
 
 export type EmbeddedSocialMessageLink = {
@@ -551,6 +556,8 @@ export type EmbeddedSocialMessageLink = {
   to: string;
   message: string;
   translatedMessage?: string;
+  /** Position among all messenger entries of the RP output, in source order. */
+  sourceOrder?: number;
 };
 
 export type SocialDirectMessageOpenRequest = {

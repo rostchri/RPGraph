@@ -43,6 +43,12 @@ import {
   type PromptCommandId,
   type PromptCommandPassRequest,
 } from './promptCommands';
+import {
+  buildPromptStepChain,
+  injectStepOutput,
+  rollPlanOutcomes,
+  stepOutputTokenNames,
+} from './promptSteps';
 import { promptImagePass } from './promptImagePass';
 import {
   storybookCreateImageCharactersFromNodes,
@@ -53,10 +59,12 @@ import {
   validateSocialMessengerAccounts,
 } from '../../chat/socialMessageValidation';
 import { stripPlanBlocks, stripPlanBlocksFromStream } from '../../chat/messageFormats';
+import { readableRuntimeName } from '../../llm/callDisplay';
 
 export type PromptPreviewPart = {
   text: string;
   actionInserted?: boolean;
+  stepOutputInserted?: string;
   historySegments?: FormattedChatHistorySegment[];
 };
 
@@ -220,13 +228,14 @@ export async function runActionAwarePrompt({
   inputValue,
   images,
   referenceImages,
-  promptBefore,
-  promptAfter,
+  promptBefore: promptBeforeInput,
+  promptAfter: promptAfterInput,
   actionConfigs,
   commandConfigs = [],
   streamsVisibleOutput,
   contributesToTokenCalibration,
   callLabel,
+  random = Math.random,
 }: {
   node: WorkflowNode;
   context: ExecuteContext;
@@ -240,7 +249,36 @@ export async function runActionAwarePrompt({
   streamsVisibleOutput: boolean;
   contributesToTokenCalibration: boolean;
   callLabel: (actionReplayCount: number) => string;
+  random?: () => number;
 }) {
+  // @step: markers split a prompt into an ordered chain of named passes. Every
+  // step before the last runs as an intermediate pass whose diced output is
+  // injected into later steps at @output:<name> tokens (or prepended to the
+  // next step without one); the last step produces the visible reply.
+  const steps = buildPromptStepChain(promptBeforeInput, promptAfterInput);
+  // @output tokens may only reference an earlier step; every other token is
+  // removed here so unresolved markers never reach the LLM.
+  steps.forEach((step, stepIndex) => {
+    const earlierNames = steps.slice(0, stepIndex).map((earlier) => earlier.name);
+    for (const field of ['before', 'after'] as const) {
+      for (const name of stepOutputTokenNames(step[field])) {
+        if (!earlierNames.includes(name)) {
+          context.reportWarning(
+            `${node.data.label}: @output:${name} has no earlier @step:${name} section; the marker was removed.`,
+          );
+          step[field] = injectStepOutput(step[field], name, '').text;
+        }
+      }
+    }
+  });
+  const outputStep = steps[steps.length - 1];
+  const intermediateSteps = steps.slice(0, -1);
+  // Snapshot the authored prompt texts before earlier steps inject their
+  // outputs; the missing-rolls warning must not trigger on "chance:" markers
+  // that arrive via an injected plan.
+  const authoredStepTexts = steps.map((step) => [step.before, step.after].join('\n'));
+  let promptBefore = outputStep.before;
+  let promptAfter = outputStep.after;
   const visionEnabled = await context.llm.supportsVision(
     node.data.connectionId,
     `${node.data.label} vision features`,
@@ -265,11 +303,11 @@ export async function runActionAwarePrompt({
     }
   };
   const availableCommandIds = Array.from(new Set(
-    parsePromptCommandTokens([promptBefore, promptAfter].join('\n'))
+    parsePromptCommandTokens([promptBeforeInput, promptAfterInput].join('\n'))
       .map((token) => knownPromptCommandId(token.name))
       .filter((commandId): commandId is PromptCommandId => !!commandId),
   ));
-  const availableActionConfigs = parsePromptActionTokens([promptBefore, promptAfter].join('\n'))
+  const availableActionConfigs = parsePromptActionTokens([promptBeforeInput, promptAfterInput].join('\n'))
     .map((token) => configForPromptActionToken(actionConfigs, token.title));
   const uniqueAvailableActionConfigs = Array.from(
     new Map(
@@ -286,6 +324,20 @@ export async function runActionAwarePrompt({
   const finalOutputActionTexts: string[] = [];
   const outputPasses: Array<{ label: string; text: string }> = [];
   const promptPasses: PromptPreviewPass[] = [];
+  const stepOutputInsertions = new Map<
+    (typeof steps)[number],
+    { before: Array<{ name: string; text: string }>; after: Array<{ name: string; text: string }> }
+  >();
+  const rememberStepOutputInsertion = (
+    step: (typeof steps)[number],
+    field: 'before' | 'after',
+    name: string,
+    text: string,
+  ) => {
+    const insertions = stepOutputInsertions.get(step) ?? { before: [], after: [] };
+    insertions[field].push({ name, text });
+    stepOutputInsertions.set(step, insertions);
+  };
   const socialCharacters = storyCharactersFromNodes(context.nodes);
   let socialAccountCorrectionText = '';
   let socialAccountReplayUsed = false;
@@ -328,15 +380,53 @@ export async function runActionAwarePrompt({
     }
     return resolvedParts.length ? resolvedParts : [{ text: resolved }];
   };
+  const markStepOutputParts = (
+    parts: PromptPreviewPart[],
+    insertions: Array<{ name: string; text: string }> | undefined,
+  ) => (insertions ?? []).reduce((currentParts, insertion) => {
+    let marked = false;
+    return currentParts.flatMap((part): PromptPreviewPart[] => {
+      if (marked || part.stepOutputInserted) return [part];
+      const insertionIndex = part.text.indexOf(insertion.text);
+      if (insertionIndex < 0) return [part];
+      marked = true;
+      const before = part.text.slice(0, insertionIndex);
+      const after = part.text.slice(insertionIndex + insertion.text.length);
+      return [
+        ...(before ? [{ ...part, text: before }] : []),
+        { text: insertion.text, stepOutputInserted: insertion.name },
+        ...(after ? [{ ...part, text: after }] : []),
+      ];
+    });
+  }, parts);
+  const stepPromptSectionParts = (
+    step: (typeof steps)[number],
+    field: 'before' | 'after',
+    original: string,
+    resolved: string,
+  ) => markStepOutputParts(
+    promptSectionParts(original, resolved),
+    stepOutputInsertions.get(step)?.[field],
+  );
+  // Matching the text input against the formatted chat history is quadratic
+  // in the history length and the input repeats across passes, so each
+  // distinct input text is resolved only once per run.
+  const historySegmentsCache = new Map<string, FormattedChatHistorySegment[] | undefined>();
+  const cachedHistorySegments = (textInput: string) => {
+    if (!historySegmentsCache.has(textInput)) {
+      historySegmentsCache.set(textInput, historySegmentsForInputValue(context, textInput));
+    }
+    return historySegmentsCache.get(textInput);
+  };
   const buildPromptSections = (textInput = inputValue) => {
     const before = promptSectionValue(promptBefore);
     const after = promptSectionValue(promptAfter);
-    const historySegments = historySegmentsForInputValue(context, textInput);
+    const historySegments = cachedHistorySegments(textInput);
     return [
       {
         label: 'Prompt Before Input',
         text: before,
-        parts: promptSectionParts(promptBefore, before),
+        parts: stepPromptSectionParts(outputStep, 'before', promptBefore, before),
       },
       {
         label: 'Text Input',
@@ -354,7 +444,7 @@ export async function runActionAwarePrompt({
       {
         label: 'Prompt After Input',
         text: after,
-        parts: promptSectionParts(promptAfter, after),
+        parts: stepPromptSectionParts(outputStep, 'after', promptAfter, after),
       },
     ];
   };
@@ -375,6 +465,26 @@ export async function runActionAwarePrompt({
       name: image.name,
       source,
     }));
+  const currentImagePass = () => promptImagePass({
+    actionReplay: actionImages.length > 0,
+    actionImages,
+    inputImages: visionEnabled ? images : [],
+    referenceImages: referenceImageValues,
+  });
+  const textInputForImagePass = (
+    text: string,
+    imagePass: ReturnType<typeof promptImagePass>,
+  ) => promptWithReferenceImageMarkers(
+    promptWithImageAttachmentMarkers(text, imagePass.inputImages, imagePass.inputImageOffset),
+    usableReferenceImages,
+    imagePass.referenceImageOffset,
+  );
+  const previewImagesForPass = (imagePass: ReturnType<typeof promptImagePass>) =>
+    imagePreviewItems([
+      ...imagePass.actionImages.map((image) => ({ image, source: 'action' as const })),
+      ...imagePass.inputImages.map((image) => ({ image, source: 'input' as const })),
+      ...imagePass.referenceImages.map((image) => ({ image, source: 'reference' as const })),
+    ]);
 
   // While a pre-reply action is still pending, the LLM may answer with either an
   // action call or the visible reply. Hold streamed chunks back until the output
@@ -421,6 +531,196 @@ export async function runActionAwarePrompt({
       }
     : undefined;
 
+  for (const [stepIndex, step] of intermediateSteps.entries()) {
+    // An intermediate step can consume pre-reply actions itself (e.g. fetching
+    // or creating a phone image the plan already knows it needs): an action
+    // request in the step output runs the follow-up and the action, then the
+    // step reruns with the action result inserted at its @action tokens. Later
+    // passes see the same consumed results.
+    let stepText = '';
+    const actionCountAtStepStart = actionResultTexts.length;
+    const maxStepPasses = Math.max(2, preReplyActionConfigs.length + 1);
+    for (let stepPassIndex = 0; stepPassIndex <= maxStepPasses; stepPassIndex += 1) {
+      const stepBefore = promptSectionValue(step.before);
+      const stepAfter = promptSectionValue(step.after);
+      const stepImagePass = currentImagePass();
+      const stepTextInput = textInputForImagePass(inputValue, stepImagePass);
+      const stepHistorySegments = cachedHistorySegments(stepTextInput);
+      const stepReplayCount = actionResultTexts.length - actionCountAtStepStart;
+      const passLabel = stepReplayCount
+        ? `Step ${step.name} replay ${stepReplayCount}`
+        : `Step ${step.name}`;
+      promptPasses.push({
+        label: passLabel,
+        images: previewImagesForPass(stepImagePass),
+        sections: [
+          ...(stepBefore
+            ? [{
+                label: 'Step Prompt Before Input',
+                text: stepBefore,
+                parts: stepPromptSectionParts(step, 'before', step.before, stepBefore),
+              }]
+            : []),
+          {
+            label: 'Text Input',
+            text: stepTextInput,
+            parts: [{ text: stepTextInput, historySegments: stepHistorySegments }],
+            historySegments: stepHistorySegments,
+          },
+          ...(stepAfter
+            ? [{
+                label: 'Step Prompt After Input',
+                text: stepAfter,
+                parts: stepPromptSectionParts(step, 'after', step.after, stepAfter),
+              }]
+            : []),
+        ],
+      });
+      context.updateRuntimeData(node.id, {
+        preview: stepReplayCount
+          ? `Step ${step.name} with action result ...`
+          : `Running step ${step.name} ...`,
+      });
+      const stepOutput = await context.llm.complete({
+        connectionId: node.data.connectionId,
+        nodeId: node.id,
+        label: `${callLabel(0)} / ${passLabel}`,
+        prompt: [stepBefore, stepTextInput, stepAfter].filter(Boolean).join('\n\n'),
+        images: stepImagePass.images,
+        contributesToTokenCalibration,
+        useConnectionSampling: true,
+      });
+      outputPasses.push({ label: `${passLabel} output`, text: stepOutput.text });
+      const actionRequest = parsePromptActionRequest(stepOutput.text);
+      if (!actionRequest) {
+        stepText = stepOutput.text;
+        break;
+      }
+      const actionConfig = preReplyActionConfigs.find(
+        (candidate) =>
+          candidate.actionId === actionRequest.action &&
+          !actionResults.has(promptActionKey(candidate.title)),
+      );
+      if (!actionConfig) {
+        context.reportWarning(
+          `${node.data.label}: Step ${step.name} requested unavailable or already-consumed action ${actionRequest.action}.`,
+        );
+        break;
+      }
+      if (stepPassIndex === maxStepPasses) {
+        context.reportWarning(`${node.data.label}: Step ${step.name} action replay limit reached.`);
+        break;
+      }
+      const followUpInstruction = promptActionInstructionText(
+        actionConfig,
+        actionAvailabilityOptions,
+        actionRequest.plan,
+      );
+      promptPasses.push({
+        label: `Step ${step.name} action follow-up: ${actionConfig.title}`,
+        images: previewImagesForPass(stepImagePass),
+        sections: [
+          ...(stepBefore
+            ? [{
+                label: 'Step Prompt Before Input',
+                text: stepBefore,
+                parts: stepPromptSectionParts(step, 'before', step.before, stepBefore),
+              }]
+            : []),
+          {
+            label: 'Text Input',
+            text: stepTextInput,
+            parts: [{ text: stepTextInput, historySegments: stepHistorySegments }],
+            historySegments: stepHistorySegments,
+          },
+          {
+            label: 'Step Action Follow-Up',
+            text: followUpInstruction,
+            parts: [{ text: followUpInstruction, actionInserted: true }],
+          },
+        ],
+      });
+      context.updateRuntimeData(node.id, {
+        preview: `Action ${actionRequest.action} requested in step ${step.name}; preparing it from the plan ...`,
+      });
+      const followUpOutput = await context.llm.complete({
+        connectionId: node.data.connectionId,
+        nodeId: node.id,
+        label: `${callLabel(0)} / Step ${step.name} action follow-up: ${actionConfig.title}`,
+        prompt: [stepBefore, stepTextInput, followUpInstruction].filter(Boolean).join('\n\n'),
+        images: stepImagePass.images,
+        contributesToTokenCalibration,
+        useConnectionSampling: true,
+      });
+      outputPasses.push({
+        label: `Step ${step.name} action follow-up output: ${actionConfig.title}`,
+        text: followUpOutput.text,
+      });
+      const actionCall = parsePromptActionCall(followUpOutput.text);
+      if (!actionCall || actionCall.action !== actionConfig.actionId) {
+        context.reportWarning(
+          `${node.data.label}: Step ${step.name} action follow-up for ${actionConfig.title} returned no valid action call.`,
+        );
+        break;
+      }
+      const actionResult = await executePromptAction(context, actionConfig, actionCall, {
+        ...actionAvailabilityOptions,
+        llmConnectionId: node.data.connectionId,
+      });
+      actionResults.set(promptActionKey(actionConfig.title), actionResult.text);
+      actionResultTexts.push(actionResult.text);
+      actionImages.push(...actionResult.images);
+      if (actionResult.finalOutputText) {
+        finalOutputActionTexts.push(actionResult.finalOutputText);
+      }
+      context.updateRuntimeData(node.id, {
+        preview: `Action ${actionCall.action} resolved; rerunning step ${step.name} ...`,
+      });
+    }
+    const rolledOutput = rollPlanOutcomes(stepText, random);
+    const stepOutputText = rolledOutput.text.trim();
+    const laterSteps = steps.slice(stepIndex + 1);
+    if (stepOutputText) {
+      // A missing-rolls warning only makes sense for plan-style steps; a
+      // prompt that never mentions "chance:" gets its output passed on
+      // verbatim.
+      if (!rolledOutput.rolls.length && /chance:/i.test(authoredStepTexts[stepIndex])) {
+        context.reportWarning(
+          `${node.data.label}: Step ${step.name} output contains no (chance: NN%) markers; it is passed on without dice rolls.`,
+        );
+      }
+      let injected = false;
+      for (const laterStep of laterSteps) {
+        const beforeInjection = injectStepOutput(laterStep.before, step.name, stepOutputText);
+        const afterInjection = injectStepOutput(laterStep.after, step.name, stepOutputText);
+        laterStep.before = beforeInjection.text;
+        laterStep.after = afterInjection.text;
+        if (beforeInjection.injected) {
+          rememberStepOutputInsertion(laterStep, 'before', step.name, stepOutputText);
+        }
+        if (afterInjection.injected) {
+          rememberStepOutputInsertion(laterStep, 'after', step.name, stepOutputText);
+        }
+        injected = injected || beforeInjection.injected || afterInjection.injected;
+      }
+      if (!injected) {
+        const nextStep = laterSteps[0];
+        nextStep.before = [stepOutputText, nextStep.before].filter(Boolean).join('\n\n');
+        rememberStepOutputInsertion(nextStep, 'before', step.name, stepOutputText);
+      }
+    } else {
+      context.reportWarning(
+        `${node.data.label}: Step ${step.name} returned no output; continuing without it.`,
+      );
+      for (const laterStep of laterSteps) {
+        laterStep.before = injectStepOutput(laterStep.before, step.name, '').text;
+        laterStep.after = injectStepOutput(laterStep.after, step.name, '').text;
+      }
+    }
+  }
+  promptBefore = outputStep.before;
+  promptAfter = outputStep.after;
+
   let generatedText = '';
   let connectionLabel = '';
   const maxActionPasses = Math.max(3, preReplyActionConfigs.length + 1);
@@ -430,38 +730,28 @@ export async function runActionAwarePrompt({
     );
     const actionReplayCount = actionResultTexts.length;
     const actionReplay = actionReplayCount > 0;
-    const passLabel = actionReplay ? `Action replay ${actionReplayCount}` : 'Initial action prompt';
-    const inputImagesForPass = visionEnabled ? images : [];
-    const imagePass = promptImagePass({
-      actionReplay,
-      actionImages,
-      inputImages: inputImagesForPass,
-      referenceImages: referenceImageValues,
-    });
-    const textInputWithInputImageMarkers = promptWithImageAttachmentMarkers(
-      inputValue,
-      inputImagesForPass,
-      imagePass.inputImageOffset,
-    );
-    const textInputForPass = promptWithReferenceImageMarkers(
-      textInputWithInputImageMarkers,
-      usableReferenceImages,
-      imagePass.referenceImageOffset,
-    );
+    const outputStepLabel = outputStep.name ? `Step ${outputStep.name}` : '';
+    const passLabel = outputStepLabel
+      ? `${outputStepLabel}${actionReplay ? ` replay ${actionReplayCount}` : ''}`
+      : actionReplay
+        ? `Action replay ${actionReplayCount}`
+        : 'Initial action prompt';
+    const imagePass = currentImagePass();
+    const textInputForPass = textInputForImagePass(inputValue, imagePass);
     const promptForPass = buildCombinedPrompt(textInputForPass);
     promptPasses.push({
       label: passLabel,
-      images: imagePreviewItems([
-        ...imagePass.actionImages.map((image) => ({ image, source: 'action' as const })),
-        ...imagePass.inputImages.map((image) => ({ image, source: 'input' as const })),
-        ...imagePass.referenceImages.map((image) => ({ image, source: 'reference' as const })),
-      ]),
+      images: previewImagesForPass(imagePass),
       sections: buildPromptSections(textInputForPass),
     });
     let output = await context.llm.complete({
       connectionId: node.data.connectionId,
       nodeId: node.id,
-      label: callLabel(actionReplayCount),
+      // A named output step carries its name into the call label so the run
+      // progress shows e.g. "Step: Translation" instead of the generic main.
+      label: outputStep.name
+        ? `${callLabel(actionReplayCount)} / Step ${outputStep.name}`
+        : callLabel(actionReplayCount),
       prompt: promptForPass,
       images: imagePass.images,
       onChunk: streamsVisibleOutput
@@ -471,7 +761,11 @@ export async function runActionAwarePrompt({
       useConnectionSampling: true,
     });
     outputPasses.push({
-      label: actionReplay ? `Action replay ${actionReplayCount} output` : 'Initial action output',
+      label: outputStepLabel
+        ? `${passLabel} output`
+        : actionReplay
+          ? `Action replay ${actionReplayCount} output`
+          : 'Initial action output',
       text: output.text,
     });
     let socialAccountValidation = validateSocialMessengerAccounts({
@@ -599,35 +893,23 @@ export async function runActionAwarePrompt({
         actionAvailabilityOptions,
         actionRequest.plan,
       );
-      const followUpImagePass = promptImagePass({
-        actionReplay: false,
-        actionImages: [],
-        inputImages: inputImagesForPass,
-        referenceImages: referenceImageValues,
-      });
-      const followUpTextWithInputImageMarkers = promptWithImageAttachmentMarkers(
-        inputValue,
-        inputImagesForPass,
-        followUpImagePass.inputImageOffset,
-      );
-      const followUpTextInput = promptWithReferenceImageMarkers(
-        followUpTextWithInputImageMarkers,
-        usableReferenceImages,
-        followUpImagePass.referenceImageOffset,
-      );
+      const followUpImagePass = currentImagePass();
+      const followUpTextInput = textInputForImagePass(inputValue, followUpImagePass);
       const promptBeforeForFollowUp = promptSectionValue(promptBefore);
-      const followUpHistorySegments = historySegmentsForInputValue(context, followUpTextInput);
+      const followUpHistorySegments = cachedHistorySegments(followUpTextInput);
       promptPasses.push({
         label: `Action follow-up: ${actionConfig.title}`,
-        images: imagePreviewItems([
-          ...followUpImagePass.inputImages.map((image) => ({ image, source: 'input' as const })),
-          ...followUpImagePass.referenceImages.map((image) => ({ image, source: 'reference' as const })),
-        ]),
+        images: previewImagesForPass(followUpImagePass),
         sections: [
           {
             label: 'Prompt Before Input',
             text: promptBeforeForFollowUp,
-            parts: promptSectionParts(promptBefore, promptBeforeForFollowUp),
+            parts: stepPromptSectionParts(
+              outputStep,
+              'before',
+              promptBefore,
+              promptBeforeForFollowUp,
+            ),
           },
           {
             label: 'Text Input',
@@ -741,8 +1023,12 @@ export async function runActionAwarePrompt({
       }, new Map<PromptCommandId, PromptCommandPassRequest>()).values(),
     );
     if (uniqueRequests.length && visibleReply) {
-      const commandNames = uniqueRequests.map((request) => request.config.commandId).join(', ');
+      const commandNames = uniqueRequests
+        .map((request) => readableRuntimeName(request.config.commandId))
+        .join(', ');
       const instruction = promptCommandPassInstruction(visibleReply, uniqueRequests, actionResultTexts);
+      const commandImagePass = currentImagePass();
+      const commandTextInput = textInputForImagePass(inputValue, commandImagePass);
       // The command pass prompts still see the full reply including [[plan]]
       // blocks; everything streamed to the chat hides them.
       const streamedVisibleReply = stripPlanBlocks(visibleReply);
@@ -759,14 +1045,15 @@ export async function runActionAwarePrompt({
             }
           }
         : undefined;
-      const historySegments = historySegmentsForInputValue(context, inputValue);
+      const historySegments = cachedHistorySegments(commandTextInput);
       promptPasses.push({
-        label: `Command pass: ${commandNames}`,
+        label: `Command: ${commandNames}`,
+        images: previewImagesForPass(commandImagePass),
         sections: [
           {
             label: 'Text Input',
-            text: inputValue,
-            parts: [{ text: inputValue, historySegments }],
+            text: commandTextInput,
+            parts: [{ text: commandTextInput, historySegments }],
             historySegments,
           },
           {
@@ -782,13 +1069,14 @@ export async function runActionAwarePrompt({
       let output = await context.llm.complete({
         connectionId: node.data.connectionId,
         nodeId: node.id,
-        label: `${callLabel(0)} / Command pass`,
-        prompt: [inputValue, instruction].filter(Boolean).join('\n\n'),
+        label: `${callLabel(0)} / Command: ${commandNames}`,
+        prompt: [commandTextInput, instruction].filter(Boolean).join('\n\n'),
+        images: commandImagePass.images,
         onChunk: streamCommandOutput,
         contributesToTokenCalibration,
         useConnectionSampling: true,
       });
-      outputPasses.push({ label: `Command pass output`, text: output.text });
+      outputPasses.push({ label: `Command output: ${commandNames}`, text: output.text });
       let commandSocialValidation = validateSocialMessengerAccounts({
         text: output.text,
         characters: socialCharacters,
@@ -797,12 +1085,13 @@ export async function runActionAwarePrompt({
       if (commandSocialValidation.issues.length > 0 && context.retryFormatErrorsEnabled) {
         const correction = socialMessageCorrectionContext(commandSocialValidation.issues);
         promptPasses.push({
-          label: 'Command social account correction replay',
+          label: `Command correction: ${commandNames}`,
+          images: previewImagesForPass(commandImagePass),
           sections: [
             {
               label: 'Text Input',
-              text: inputValue,
-              parts: [{ text: inputValue, historySegments }],
+              text: commandTextInput,
+              parts: [{ text: commandTextInput, historySegments }],
               historySegments,
             },
             {
@@ -826,14 +1115,15 @@ export async function runActionAwarePrompt({
         output = await context.llm.complete({
           connectionId: node.data.connectionId,
           nodeId: node.id,
-          label: `${callLabel(0)} / Command social account correction`,
-          prompt: [inputValue, correction, instruction].filter(Boolean).join('\n\n'),
+          label: `${callLabel(0)} / Command: ${commandNames} / Correction`,
+          prompt: [commandTextInput, correction, instruction].filter(Boolean).join('\n\n'),
+          images: commandImagePass.images,
           onChunk: streamCommandOutput,
           contributesToTokenCalibration,
           useConnectionSampling: true,
         });
         outputPasses.push({
-          label: 'Command social account correction output',
+          label: `Command correction output: ${commandNames}`,
           text: output.text,
         });
         commandSocialValidation = validateSocialMessengerAccounts({
@@ -889,20 +1179,25 @@ export async function runActionAwarePrompt({
     if (actionResults.has(actionKey)) {
       continue;
     }
-    const inputImagesForPass = visionEnabled ? images : [];
+    const afterReplyImagePass = currentImagePass();
     const instruction = promptActionAfterReplyText(actionConfig, visibleReply);
     const promptBeforeForPass = promptSectionValue(promptBefore);
-    const textInputForPass = promptWithImageAttachmentMarkers(inputValue, inputImagesForPass, 0);
+    const textInputForPass = textInputForImagePass(inputValue, afterReplyImagePass);
     const passLabel = `After-reply action: ${actionConfig.title}`;
-    const historySegments = historySegmentsForInputValue(context, textInputForPass);
+    const historySegments = cachedHistorySegments(textInputForPass);
     promptPasses.push({
       label: passLabel,
-      images: imagePreviewItems(inputImagesForPass.map((image) => ({ image, source: 'input' as const }))),
+      images: previewImagesForPass(afterReplyImagePass),
       sections: [
         {
           label: 'Prompt Before Input',
           text: promptBeforeForPass,
-          parts: promptSectionParts(promptBefore, promptBeforeForPass),
+          parts: stepPromptSectionParts(
+            outputStep,
+            'before',
+            promptBefore,
+            promptBeforeForPass,
+          ),
         },
         {
           label: 'Text Input',
@@ -923,9 +1218,9 @@ export async function runActionAwarePrompt({
     const output = await context.llm.complete({
       connectionId: node.data.connectionId,
       nodeId: node.id,
-      label: `${callLabel(0)} / After-reply action`,
+      label: `${callLabel(0)} / After-reply action: ${actionConfig.title}`,
       prompt: [promptBeforeForPass, textInputForPass, instruction].filter(Boolean).join('\n\n'),
-      images: inputImagesForPass,
+      images: afterReplyImagePass.images,
       contributesToTokenCalibration,
       useConnectionSampling: true,
     });

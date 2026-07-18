@@ -31,7 +31,7 @@ The project describes itself in `package.json` as:
 
 > Local-first node graph studio for roleplay workflows.
 
-The current UI labels the product as `RPgraph Studio v0.4.8 Beta`.
+The current UI labels the product as `RPgraph Studio v0.4.9 Beta`.
 
 ## Main Interface
 
@@ -56,7 +56,7 @@ At a high level, the app works like this:
 6. The runtime resolves connected nodes, calls LLM or utility nodes as needed, and updates runtime node state.
 7. The output is appended back into the chat/session timeline and shown in the UI.
 
-The bundled default workflow is a ready-to-use roleplay graph rather than a minimal three-node example. It currently combines `User Input`, `RP Output`, `Chat History`, `Context Compression`, `Event Manager`, `RP Storybook V2`, an `LLM Prompt Switch`, text combiners, a workflow-variable input, and Wire Links. The Prompt Switch routes Normal RP, Messenger Apps, and Social Media runs into the matching `RP Output` inputs. It also provides an Autoplay output that can be connected to the dedicated RP Output Autoplay input. The bundled file is the single project-root file matching `workflow.default*.json`; the app imports a newly named default into its managed workflow storage on startup.
+The two bundled default workflows are ready-to-use roleplay graphs rather than minimal three-node examples. Both combine `User Input`, `RP Output`, `Chat History`, `Context Compression`, `Event Manager`, `RP Storybook V2`, an `LLM Prompt Switch`, text combiners, a workflow-variable input, and Wire Links. The Prompt Switch routes Normal RP, Messenger Apps, and Social Media runs into the matching `RP Output` inputs. It also provides an Autoplay output that can be connected to the dedicated RP Output Autoplay input. The classic `workflow.default_vNN.json` family keeps the single-pass prompts, while `workflow.default_planning_vNN.json` uses multistep planning for Normal RP and Messenger prompts. Shared graph and format changes are maintained in both families.
 
 ## Prompt Routing
 
@@ -72,6 +72,8 @@ Social Media reuses the prompt-slot number for app-specific actions: `0` = Fotog
 The bundled Autoplay prompts create exactly one optional background beat after a completed non-Autoplay run: Local Activity keeps the beat in or immediately around the player's current scene, Remote Activity sets it entirely elsewhere. The chat UI selects exactly one mode for automatic runs, and each mode can also be triggered manually. Its private English control input identifies the player-controlled character, bypasses input translation, and is not appended to visible chat history. The dedicated RP Output Autoplay input uses the same plain RP and embedded phone/app parsers as Normal RP without sharing its graph port. Autoplay turns never schedule another Autoplay turn.
 
 The `User Input` node exposes these as `Message Format` and `Turn Mode` outputs. When those outputs are connected to an `LLM Prompt Switch`, they select the switch's output channel and prompt slot. The switch then combines the selected prompt-before text, the incoming graph text, and the selected prompt-after text, calls the configured LLM provider, and emits only on the selected output channel.
+
+A prompt slot can additionally be split into a chain of freely named steps with standalone marker lines `@step:<name>` (case-insensitive; letters, digits, `_`, `-`). Steps run in the order their names first appear; the last step is the output step whose reply is streamed as the visible result, every earlier step runs first as a separate intermediate LLM pass. Text before the first marker belongs to the output step, so prompts without markers keep the classic single-pass behavior. Everything an intermediate LLM pass sees is visible, editable prompt text inside its section, nothing is appended from code. Each intermediate step's output replaces every `@output:<name>` token in later steps (or is prepended to the top of the next step when no later step references it), so the prompt author writes their own lead-in text around the token; an `@output` token that does not name an earlier step is removed with a warning. The multistep workflow uses this with a `planning` step ahead of the `main` output step: its planning instruction asks for a rough direction plus one to three bullets — certain developments are plain statements, uncertain ones are either/or rolls that state the success outcome with an explicit chance marker like `(chance: 80%)` and an `otherwise: ...` part for failure. The app dices every line of an intermediate output that carries a `(chance: NN%)` marker (high roll good) and replaces the marker with one of four binding results — clear success, success, failed (the otherwise-part happens), badly failed — without exposing the raw roll; bare percentages without the `chance:` keyword (dates, prices, battery levels) and lines without a marker pass through untouched, and a missing-rolls warning appears only when the step's own prompt mentions `chance:`. An intermediate step can also consume pre-reply image actions itself: an action request in the step output runs the follow-up and the action, then the step reruns with the result, so a planned phone image is fetched or created before the output pass and is never rolled; the multistep prompts request phone images exclusively in the planning step, and the main step only attaches the imageId named in the plan. Afterwards the normal output pass — including actions, commands, and streaming — runs unchanged. The splitting and dice logic lives in `src/nodes/shared/promptSteps.ts`; the multistep Normal RP and Messenger prompts use the planning step.
 
 That means UI actions such as normal chat send, phone send, AutoTurn, narrator mode, event run, social post, comment, DM, or output-action button all enter the graph with explicit routing values and can land on different prompt variants and output ports.
 
@@ -131,6 +133,8 @@ Node header colors and outgoing wire colors show the current execution state:
 - **Red**: execution error.
 
 During execution, `executeGraph` sets `runActive`, `runCompleted`, `runPrepared`, and `runError` on node data. Card rendering converts those flags into CSS classes, and edge rendering colors outgoing wires from the source node state.
+
+LLM-capable node cards show a compact route heading followed by aligned call rows for input tokens, output tokens, reasoning tokens, and duration. Prompt Switch calls use short stage labels such as `Step: Planning`, `Step: Main`, `Action: Create character phone image`, and `Command: Bank transfer` instead of repeating the selected output and prompt titles on every row. While a roleplay run is active, the Chat tab temporarily replaces the composer with a compact progress island containing the current node or LLM sub-step, a green elapsed-time clock, an activity animation, and a Cancel button. It disappears when the run finishes or is cancelled, restoring the collapsed composer so the resulting story, phone, banking, or information cards remain the focus.
 
 ## Chat, Phone, And Events
 
@@ -212,9 +216,9 @@ Important file actions:
 - `saveNamedWorkflow` exports a reusable workflow file.
 - `saveStorybook` writes the active storybook as its own file.
 - `openStoredFile`, `requestOpenFile`, and `loadStoredFile` route plain or encrypted loads through the correct unlock path.
-- `resetWorkflow` reloads the active workflow file, restores an embedded workflow snapshot, or falls back to the bundled default workflow.
+- `resetWorkflow` reloads the active workflow file, restores an embedded workflow snapshot, or restores both bundled workflow families and opens the planning workflow.
 
-The bundled default workflow name is versioned by renaming the `workflow.default*.json` file. The Electron layer naturally sorts matching names, imports a newly seen winner into managed storage, and remembers the imported filename in `workflow-state.json`.
+Bundled workflow names are versioned independently in the classic `workflow.default_vNN.json` and multistep `workflow.default_planning_vNN.json` families. On startup the Electron layer imports every bundled filename not already recorded in `workflow-state.json`. It never overwrites an existing local file, so an updated classic or planning workflow appears alongside previously imported versions. On a fresh installation the planning family is selected as the primary default; an existing installation keeps its last active workflow.
 
 ## Node System
 

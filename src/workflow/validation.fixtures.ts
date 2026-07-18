@@ -197,6 +197,7 @@ import { applyTurnCheckpointToNodes } from '../data-management/checkpointStore';
 import { executeGraph, resolveCreateImageCharacterByName } from '../graph/executeGraph';
 import { NodeLlmApi } from '../llm/NodeLlmApi';
 import { TextMetricsApi } from '../llm/tokenMetrics';
+import { llmCallStageLabel, promptSwitchRouteLabel } from '../llm/callDisplay';
 import {
   hydrateNodeData,
   persistentNodeData,
@@ -217,13 +218,21 @@ const bundledDefaultWorkflows = import.meta.glob<{ default: unknown }>(
 );
 const bundledDefaultWorkflowPaths = Object.keys(bundledDefaultWorkflows)
   .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
-const bundledDefaultWorkflowPath =
-  bundledDefaultWorkflowPaths[bundledDefaultWorkflowPaths.length - 1];
-if (!bundledDefaultWorkflowPath) {
+if (bundledDefaultWorkflowPaths.length === 0) {
   throw new Error('No workflow.default*.json file was found in the project root.');
 }
-const currentWorkflow = bundledDefaultWorkflows[bundledDefaultWorkflowPath]
+const planningDefaultWorkflowPath = [...bundledDefaultWorkflowPaths]
+  .reverse()
+  .find((filePath) => /planning/i.test(filePath));
+if (!planningDefaultWorkflowPath) {
+  throw new Error('No planning bundled workflow was found in the project root.');
+}
+const currentWorkflow = bundledDefaultWorkflows[planningDefaultWorkflowPath]
   .default as WorkflowFile;
+const allBundledDefaultWorkflows = bundledDefaultWorkflowPaths.map((filePath) => ({
+  filePath,
+  workflow: bundledDefaultWorkflows[filePath].default as WorkflowFile,
+}));
 
 function assertFixture(condition: boolean, message: string) {
   if (!condition) {
@@ -1784,10 +1793,16 @@ export function verifyWorkflowValidationFixtures() {
     'Opening History must carry social post ids, player likes, dynamic identities, and added users',
   );
 
-  assertFixture(isWorkflowFile(currentWorkflow), 'workflow.default.json must load');
   assertFixture(
-    currentWorkflow.formatVersion === currentWorkflowFormatVersion,
-    'workflow.default.json must declare its format version',
+    allBundledDefaultWorkflows.length === 2 &&
+      allBundledDefaultWorkflows.every(({ workflow }) => isWorkflowFile(workflow)),
+    'both bundled default workflows must load',
+  );
+  assertFixture(
+    allBundledDefaultWorkflows.every(
+      ({ workflow }) => workflow.formatVersion === currentWorkflowFormatVersion,
+    ),
+    'both bundled default workflows must declare the current format version',
   );
   const currentPromptSwitch = currentWorkflow.nodes.find(
     (node) => node.data.nodeType === 'llm-prompt-switch',
@@ -3318,6 +3333,28 @@ export function verifyWorkflowValidationFixtures() {
       embeddedPhoneConversation.phoneMessages[1]?.message === 'Yes, on my way home.',
     'embedded phone parser must preserve multi-message conversations in order',
   );
+  const interleavedMessengerOutput = parseEmbeddedPhoneMessagesFromRpOutput([
+    'Helga fires off a parting shot.',
+    '{"fotogramApp":[{"from":"Helga Harper","to":"Troll872","message":"Stay mad!"}]}',
+    'Then she chases up her sister.',
+    '{"whatsUpApp":[{"from":"Helga Harper","to":"Espen Harper","message":"Hurry up!"}]}',
+  ].join('\n\n'));
+  assertFixture(
+    interleavedMessengerOutput.socialDirectMessages[0]?.sourceOrder === 0 &&
+      interleavedMessengerOutput.phoneMessages[0]?.sourceOrder === 1,
+    'messenger entries must record their source order across phone and social apps',
+  );
+  const streamingMessengerPreview = embeddedPhoneMessagesLivePreview([
+    'Helga fires off a parting shot.',
+    '{"fotogramApp":[{"from":"Helga Harper","to":"Troll872","message":"Stay mad!"}]}',
+    'Then she chases up her sister.',
+    '{"whatsUpApp":[{"from":"Helga Harper","to":"Espen Harper","message":"Hurry u',
+  ].join('\n\n'));
+  assertFixture(
+    streamingMessengerPreview.socialDirectMessages[0]?.sourceOrder === 0 &&
+      streamingMessengerPreview.phoneMessages[0]?.sourceOrder === 1,
+    'the streaming preview must number the open messenger object after every completed one',
+  );
   assertFixture(
     knownPromptCommandId('SIMULATE_AI_CHAT') === 'simulate_ai_chat' &&
       knownPromptCommandId('Simulate_ChatGPD') === 'simulate_ai_chat' &&
@@ -3333,13 +3370,13 @@ export function verifyWorkflowValidationFixtures() {
       formatPromptCommandTokens('@command:bank_transfer\n@COMMAND:simulate_chatgpd') ===
         '@command: Bank_transfer\n@command: Simulate_ChatGPD' &&
       replacePromptCommandTokensWithHints('@command: Simulate_ChatGPD') ===
-        '[simulate_ai_chat: rough plan — who chats with ChatGPD and about what]' &&
+        '[simulate_ai_chat: rough plan (who chats with ChatGPD and about what)]' &&
       formatPromptCommandTokens('@command:messenger_conversation') === '@command: Messenger_conversation' &&
       replacePromptCommandTokensWithHints('@command: Messenger_conversation') ===
-        '[messenger_conversation: rough plan — app, both people, and what the exchange covers]' &&
+        '[messenger_conversation: rough plan (app, both people, and what the exchange covers)]' &&
       formatPromptCommandTokens('@command:create_note') === '@command: Create_Note' &&
       replacePromptCommandTokensWithHints('@command: Create_Note') ===
-        '[create_note: rough plan — whose note and what it will contain]',
+        '[create_note: rough plan (whose note and what it will contain)]',
     'prompt commands must accept flexible casing and spacing while preserving their internal command requests',
   );
   const inlineCommandRequest = parsePromptCommandRequest(
@@ -4732,9 +4769,12 @@ export function verifyWorkflowValidationFixtures() {
       turnTrace.steps[0]?.promptPasses?.[0]?.sections?.[0]?.text.includes('Older context sentence 1 about party planning.') === false &&
       turnTrace.steps[0]?.promptPasses?.[0]?.sections?.[1]?.parts?.[1]?.actionInserted === true &&
       turnTrace.steps[1]?.promptAfter === undefined &&
-      turnTrace.steps[1]?.promptPasses?.[0]?.prompt.includes('First-pass plan:') === true &&
-      turnTrace.steps[2]?.promptPasses?.[0]?.prompt.includes('img-1: Sarah mirror selfie') === true,
-    'turn traces must identify the Prompt Switch route, include full action prompt passes, and excerpt long text input',
+      turnTrace.steps[1]?.promptPasses?.[0]?.sections?.some((section) => section.label === 'Text Input') === false &&
+      turnTrace.steps[1]?.promptPasses?.[0]?.sections?.some((section) => section.text.includes('First-pass plan:')) === true &&
+      turnTrace.steps[2]?.promptPasses?.[0]?.sections?.some((section) => section.label === 'Text Input') === false &&
+      turnTrace.steps[2]?.promptPasses?.[0]?.sections?.some((section) => section.text.includes('img-1: Sarah mirror selfie')) === true &&
+      (JSON.stringify(turnTrace).match(/"label":"Text Input"/g)?.length ?? 0) === 1,
+    'turn traces must identify the Prompt Switch route, include each action pass, and retain text input only once',
   );
   assertFixture(
     !!turnTrace.steps[0]?.warnings?.includes('Prompt slot fallback used.') &&
@@ -4749,7 +4789,7 @@ export function verifyWorkflowValidationFixtures() {
   assertFixture(
     turnTrace.warnings?.length === 1 &&
       turnTraceCopyPayload([turnTrace]).range.fromTurn === 40 &&
-      turnTraceCopyPayload([turnTrace]).version === 4 &&
+      turnTraceCopyPayload([turnTrace]).version === 5 &&
       turnTraceCopyPayload([turnTrace]).privacy === 'memory-only' &&
       JSON.stringify(turnTraceCopyPayload([turnTrace])).includes('Text Input excerpt: showing the last') &&
       !JSON.stringify(turnTraceCopyPayload([turnTrace])).includes('Older context sentence 1 about party planning.') &&
@@ -5049,6 +5089,220 @@ async function verifyPromptRunFixtures() {
       socialReplayResult.generatedText ===
         'Espen realizes that Leo is not on OnlyFriends and puts the phone away.',
     'invalid social accounts must discard the first output and replay the same prompt once with targeted context',
+  );
+
+  const planStepRequests: Array<{
+    prompt: string;
+    images?: Array<{ id: string }>;
+  }> = [];
+  const planStepWarnings: string[] = [];
+  const planStepOutputs = [
+    '- Helga convinces Espen to lend her money (chance: 80%)\n- Espen storms off angrily (chance: 20%)',
+    'Helga grins as Espen finally hands over the bill.',
+  ];
+  const planInputImage = {
+    id: 'input_image_01',
+    name: 'Input image',
+    mimeType: 'image/jpeg' as const,
+    size: 1,
+    dataUrl: 'data:image/jpeg;base64,input',
+  };
+  const planReferenceImage = {
+    id: 'reference_image_01',
+    name: 'Reference image',
+    mimeType: 'image/jpeg' as const,
+    size: 1,
+    dataUrl: 'data:image/jpeg;base64,reference',
+  };
+  const planStepRandomValues = [0.99, 0];
+  const planStepContext = {
+    nodes: [],
+    edges: [],
+    historyMessages: [],
+    comfyProviderIds: [],
+    providerHealthById: {},
+    llm: {
+      supportsVision: async () => true,
+      complete: async (request: { prompt: string; images?: Array<{ id: string }> }) => {
+        planStepRequests.push(request);
+        return { text: planStepOutputs.shift() ?? '', connection: { label: 'Fixture LLM' } };
+      },
+    },
+    reportWarning: (message: string) => planStepWarnings.push(message),
+    updateRuntimeData: () => {},
+  } as unknown as ExecuteContext;
+  const planStepResult = await runActionAwarePrompt({
+    node,
+    context: planStepContext,
+    inputValue: 'Helga tries to convince Espen.',
+    images: [planInputImage],
+    referenceImages: [{
+      index: 1,
+      imageId: planReferenceImage.id,
+      attachment: planReferenceImage,
+      messageId: 1,
+    }],
+    promptBefore: '',
+    promptAfter: [
+      '@step:planning',
+      'Plan the possible outcomes of the scene.',
+      'End every bullet with its probability as (chance: NN%).',
+      '@step:main',
+      'Write the scene as RP story text.',
+      'Here is the diced plan for this turn:',
+      '@output:planning',
+      'Keep the reply short.',
+    ].join('\n'),
+    actionConfigs: [],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+    random: () => planStepRandomValues.shift() ?? 0.5,
+  });
+  const planStepPrompts = planStepRequests.map((request) => request.prompt);
+  assertFixture(
+    planStepPrompts.length === 2 &&
+      planStepPrompts[0]?.includes('Plan the possible outcomes of the scene.') === true &&
+      planStepPrompts[0]?.includes('End every bullet with its probability as (chance: NN%).') === true &&
+      !planStepPrompts[0]?.includes('Write the scene as RP story text.'),
+    'a @step:planning section must run a separate planning pass without the main prompt',
+  );
+  assertFixture(
+    planStepRequests.every((request) =>
+      request.images?.map((image) => image.id).join(',') ===
+        'input_image_01,reference_image_01' &&
+      request.prompt.includes('[Attached input image Nr1: input_image_01]') &&
+      request.prompt.includes('[Attached input image Nr2: reference_image_01]')
+    ),
+    'planning and main passes must both receive vision-enabled input and reference images in prompt order',
+  );
+  const planStepMainPrompt = planStepPrompts[1] ?? '';
+  assertFixture(
+    planStepMainPrompt.includes('(chance: 80%: CLEAR SUCCESS, this happens decisively; skip any otherwise-part)') &&
+      planStepMainPrompt.includes('(chance: 20%: BADLY FAILED, this goes thoroughly wrong; the otherwise-part happens emphatically)') &&
+      planStepMainPrompt.indexOf('Write the scene as RP story text.') <
+        planStepMainPrompt.indexOf('Here is the diced plan for this turn:') &&
+      planStepMainPrompt.indexOf('Here is the diced plan for this turn:') <
+        planStepMainPrompt.indexOf('(chance: 80%: CLEAR SUCCESS') &&
+      planStepMainPrompt.indexOf('(chance: 20%: BADLY FAILED') <
+        planStepMainPrompt.indexOf('Keep the reply short.') &&
+      !planStepMainPrompt.includes('@output:planning') &&
+      !planStepMainPrompt.includes('@step:') &&
+      !planStepMainPrompt.includes('Plan the possible outcomes of the scene.'),
+    'the diced plan must replace the @output:planning token inside the main prompt',
+  );
+  assertFixture(
+    planStepWarnings.length === 0 &&
+      planStepResult.generatedText === 'Helga grins as Espen finally hands over the bill.' &&
+      planStepResult.debug.promptPasses?.length === 2 &&
+      planStepResult.debug.promptPasses[1]?.label === 'Step main' &&
+      planStepResult.debug.promptPasses[1]?.sections?.some((section) =>
+        section.parts?.some((part) =>
+          part.stepOutputInserted === 'planning' &&
+          part.text.includes('(chance: 80%: CLEAR SUCCESS'),
+        ),
+      ) === true &&
+      planStepResult.debug.outputPasses?.map((pass) => pass.label).join(',') ===
+        'Step planning output,Step main output',
+    'a two-step prompt must return the main reply and keep trace prompt/output passes aligned',
+  );
+
+  const multiStepRequests: string[] = [];
+  const multiStepWarnings: string[] = [];
+  const multiStepOutputs = [
+    '- Helga convinces Espen to lend her money (chance: 80%)\n- Her phone battery is at 20%',
+    'Helga grinst, als Espen ihr endlich den Schein reicht.',
+    'Helga grins as Espen finally hands over the bill.',
+  ];
+  const multiStepContext = {
+    nodes: [],
+    edges: [],
+    historyMessages: [],
+    comfyProviderIds: [],
+    providerHealthById: {},
+    llm: {
+      supportsVision: async () => false,
+      complete: async (request: { prompt: string }) => {
+        multiStepRequests.push(request.prompt);
+        return { text: multiStepOutputs.shift() ?? '', connection: { label: 'Fixture LLM' } };
+      },
+    },
+    reportWarning: (message: string) => multiStepWarnings.push(message),
+    updateRuntimeData: () => {},
+  } as unknown as ExecuteContext;
+  const multiStepResult = await runActionAwarePrompt({
+    node,
+    context: multiStepContext,
+    inputValue: 'Helga tries to convince Espen.',
+    images: [],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: [
+      '@step:planning',
+      'Plan the outcome with a probability as (chance: NN%).',
+      '@step:draft',
+      'Write the scene in German based on this plan:',
+      '@output:planning',
+      '@step:translation',
+      'Translate the following scene to English:',
+      '@output:draft',
+    ].join('\n'),
+    actionConfigs: [],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+    random: () => 0.99,
+  });
+  assertFixture(
+    multiStepRequests.length === 3 &&
+      multiStepRequests[1]?.includes('Write the scene in German based on this plan:') === true &&
+      multiStepRequests[1]?.includes('(chance: 80%: CLEAR SUCCESS') === true &&
+      multiStepRequests[1]?.includes('- Her phone battery is at 20%') === true &&
+      !multiStepRequests[1]?.includes('20%:') &&
+      !multiStepRequests[1]?.includes('Translate the following scene to English:') &&
+      multiStepRequests[2]?.includes('Translate the following scene to English:') === true &&
+      multiStepRequests[2]?.includes('Helga grinst, als Espen ihr endlich den Schein reicht.') === true &&
+      !multiStepRequests[2]?.includes('@output:draft') &&
+      multiStepWarnings.length === 0 &&
+      multiStepResult.generatedText === 'Helga grins as Espen finally hands over the bill.' &&
+      multiStepResult.debug.outputPasses?.map((pass) => pass.label).join(',') ===
+        'Step planning output,Step draft output,Step translation output',
+    'custom @step names must chain intermediate outputs into later steps and stream only the last step',
+  );
+  const promptSwitchCallDisplayData = {
+    nodeType: 'llm-prompt-switch',
+    label: 'LLM Prompt Switch',
+    description: '',
+    preview: '',
+    llmPromptSwitchOutputTitles: ['Messenger Apps'],
+    llmPromptSwitchPromptTitlesByOutput: [['WhatsUp Prompt No Image']],
+    llmPromptSwitchSelectedOutputChannel: 0,
+    llmPromptSwitchSelectedPromptSlot: 0,
+  } as WorkflowNodeData;
+  assertFixture(
+    promptSwitchRouteLabel(promptSwitchCallDisplayData) ===
+      'Messenger Apps / WhatsUp Prompt No Image' &&
+      llmCallStageLabel(
+        promptSwitchCallDisplayData,
+        'Messenger Apps / WhatsUp Prompt No Image / Step planning',
+      ) === 'Step: Planning' &&
+      llmCallStageLabel(
+        promptSwitchCallDisplayData,
+        'Messenger Apps / WhatsUp Prompt No Image / Action replay 1 / Step main',
+      ) === 'Step: Main' &&
+      llmCallStageLabel(
+        promptSwitchCallDisplayData,
+        'Messenger Apps / WhatsUp Prompt No Image / Step translation replay 2',
+      ) === 'Step: Translation · Replay 2' &&
+      llmCallStageLabel(
+        promptSwitchCallDisplayData,
+        'Messenger Apps / WhatsUp Prompt No Image',
+      ) === 'Step: Main' &&
+      llmCallStageLabel(
+        promptSwitchCallDisplayData,
+        'Messenger Apps / WhatsUp Prompt No Image / Command: Bank transfer',
+      ) === 'Command: Bank transfer',
+    'prompt switch call display labels must keep one route heading and concise stage names',
   );
 
   const runStreamingScenario = async (llmTexts: string[]) => {

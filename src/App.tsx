@@ -3712,7 +3712,7 @@ function App() {
     });
     let lastResponseText = '';
     const attemptSpeakerAnalysis = async () => {
-      updateLlmNodeActive(outputNode.id, true);
+      updateLlmNodeActive(outputNode.id, true, 'Speakers');
       let completion: Awaited<ReturnType<NodeLlmApi['complete']>>;
       try {
         completion = await nodeLlm.withAbortSignal(signal).complete({
@@ -3883,7 +3883,7 @@ function App() {
       displayLanguage: language,
       recentHistoryContext,
     });
-    updateLlmNodeActive(nodeId, true);
+    updateLlmNodeActive(nodeId, true, label);
     try {
       const completion = await nodeLlm.withAbortSignal(signal).complete({
         connectionId,
@@ -3924,7 +3924,7 @@ function App() {
       channel,
       recentHistoryContext,
     });
-    updateLlmNodeActive(nodeId, true);
+    updateLlmNodeActive(nodeId, true, channel === 'phone' ? 'Act Phone' : 'Act RP');
     try {
       const completion = await nodeLlm.withAbortSignal(signal).complete({
         connectionId,
@@ -6669,6 +6669,7 @@ function App() {
           <div className="chat-lockable">
           {chatPanelView === 'chat' ? (
             <ChatConversationPanel
+              runtimeNodes={nodes}
               messages={messages}
               storyCharacters={storyCharacters}
               characterColors={characterColors}
@@ -6681,6 +6682,8 @@ function App() {
               editingDraft={editingDraft}
               editableUserMessageId={editableUserMessageId}
               isRunning={isRunning}
+              runStartTimeMs={runStartTimeMs}
+              onCancelRun={cancelRunOrUndoLastTurn}
               englishProcessingEnabled={englishProcessingEnabled}
               dialogueHighlightEnabled={dialogueColorsEnabled}
               dialogueVoiceSpeakerNames={dialogueVoiceSpeakerNames}

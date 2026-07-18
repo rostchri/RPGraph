@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import {
   defaultPromptActionConfig,
@@ -935,25 +935,42 @@ function previewBlock(
   label: string,
   text: string,
   parts: PromptPreviewPart[] = [{ text }],
+  tone: 'text-input' | 'prompt' | 'output' | 'images' = 'prompt',
 ) {
   return (
-    <details className="prompt-preview-section" key={label} open>
+    <details className={`prompt-preview-section ${tone}`} key={label} open>
       <summary className="prompt-preview-section-label">{label}</summary>
       <div className="prompt-preview-section-text">
         {text
-          ? parts.map((part, index) => (
-            <HighlightedPreviewText
-              chatHistory={label === 'Text Input' ? 'auto' : 'none'}
-              className={`prompt-preview-text-part${part.actionInserted ? ' action-inserted' : ''}`}
-              historySegments={part.historySegments}
-              key={index}
-              text={part.text}
-            />
-          ))
+          ? parts.map((part, index) => part.stepOutputInserted ? (
+            <div className="prompt-preview-step-output" key={index}>
+              <strong>Add Output {readableStepName(part.stepOutputInserted)}:</strong>
+              <HighlightedPreviewText
+                className="prompt-preview-text-part"
+                text={part.text}
+              />
+            </div>
+          ) : (
+              <HighlightedPreviewText
+                chatHistory={label === 'Text Input' ? 'auto' : 'none'}
+                className={`prompt-preview-text-part${part.actionInserted ? ' action-inserted' : ''}`}
+                historySegments={part.historySegments}
+                key={index}
+                text={part.text}
+              />
+            ))
           : <span className="prompt-preview-empty">Empty</span>}
       </div>
     </details>
   );
+}
+
+function readableStepName(name: string) {
+  return name
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toLocaleUpperCase()}${part.slice(1)}`)
+    .join(' ');
 }
 
 function previewImagesText(images: Array<{ index: number; id: string; name: string }> | undefined) {
@@ -961,6 +978,10 @@ function previewImagesText(images: Array<{ index: number; id: string; name: stri
   return images
     .map((image) => `Image ${image.index} = ${image.id}${image.name && image.name !== image.id ? ` (${image.name})` : ''}`)
     .join('\n');
+}
+
+function isTextInputSection(label: string) {
+  return label.trim().toLocaleLowerCase() === 'text input';
 }
 
 export function PromptPreviewTools({
@@ -975,6 +996,10 @@ export function PromptPreviewTools({
   runLabel: string;
 }) {
   const [promptRouteOpen, setPromptRouteOpen] = useState(false);
+  const promptRouteScrollRef = useRef<HTMLDivElement>(null);
+  const promptRouteBackdropDismiss = useBackdropDismiss<HTMLDivElement>(
+    () => setPromptRouteOpen(false),
+  );
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -996,6 +1021,17 @@ export function PromptPreviewTools({
       ? [{ label: 'Output', text: generatedText }]
       : [];
   const routePassCount = Math.max(promptPasses.length, outputPasses.length);
+  const textInputSection = promptPasses
+    .flatMap((pass) => pass.sections ?? [])
+    .find((section) => isTextInputSection(section.label));
+
+  useLayoutEffect(() => {
+    if (!promptRouteOpen) return;
+    const scrollContainer = promptRouteScrollRef.current;
+    if (scrollContainer) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
+  }, [promptRouteOpen, routePassCount]);
 
   return (
     <>
@@ -1010,19 +1046,35 @@ export function PromptPreviewTools({
         </button>
       </div>
       {promptRouteOpen && typeof document !== 'undefined' ? createPortal(
-        <div className="prompt-preview-modal-backdrop nodrag nowheel" role="dialog" aria-modal="true" aria-labelledby={`${id}-prompt-route-title`}>
-          <section className="prompt-preview-modal">
-            <div className="prompt-preview-modal-header">
+        <div
+          className="prompt-preview-modal-backdrop nodrag nowheel"
+          role="presentation"
+          {...promptRouteBackdropDismiss}
+        >
+          <section
+            className="prompt-preview-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${id}-prompt-route-title`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="dialog-header">
               <div>
-                <strong id={`${id}-prompt-route-title`}>Prompt Route</strong>
-                <span>Exact LLM input and raw output for each {runLabel} pass.</span>
+                <h2 id={`${id}-prompt-route-title`}>Prompt Route</h2>
+                <p>Text input once, changing LLM prompts, images, and raw output for each {runLabel} pass.</p>
               </div>
-              <button className="inspect-button prompt-action-icon-button" type="button" onClick={() => setPromptRouteOpen(false)}>x</button>
+              <button className="close-button" type="button" onClick={() => setPromptRouteOpen(false)}>Close</button>
             </div>
-            <div className="prompt-preview-blocks">
+            <div className="prompt-preview-blocks" ref={promptRouteScrollRef}>
+              {textInputSection
+                ? previewBlock('Text Input', textInputSection.text, textInputSection.parts, 'text-input')
+                : null}
               {Array.from({ length: routePassCount }, (_entry, index) => {
                 const promptPass = promptPasses[index];
                 const outputPass = outputPasses[index];
+                const changingSections = promptPass?.sections?.filter(
+                  (section) => !isTextInputSection(section.label),
+                );
                 return (
                   <article className="prompt-preview-route-pass" key={`${index}-${promptPass?.label ?? outputPass?.label ?? 'pass'}`}>
                     <header>
@@ -1030,12 +1082,12 @@ export function PromptPreviewTools({
                       {outputPass?.label ? <span>{outputPass.label}</span> : null}
                     </header>
                     {promptPass?.images !== undefined
-                      ? previewBlock('Images Sent To LLM', previewImagesText(promptPass.images))
+                      ? previewBlock('Images Sent To LLM', previewImagesText(promptPass.images), undefined, 'images')
                       : null}
-                    {promptPass?.sections?.length
-                      ? promptPass.sections.map((section) => previewBlock(section.label, section.text, section.parts))
+                    {promptPass?.sections
+                      ? changingSections?.map((section) => previewBlock(section.label, section.text, section.parts))
                       : previewBlock('Prompt', promptPass?.prompt ?? '')}
-                    {previewBlock(outputPass?.label ?? 'Output', outputPass?.text ?? '')}
+                    {previewBlock(outputPass?.label ?? 'Output', outputPass?.text ?? '', undefined, 'output')}
                   </article>
                 );
               })}
