@@ -1253,24 +1253,36 @@ export async function runActionAwarePrompt({
     };
     if (
       (!actionCall || actionCall.action !== actionConfig.actionId || !captionCallMatchesRequiredState()) &&
-      actionConfig.actionId === 'updatePhoneImageCaption'
+      (actionConfig.actionId === 'updatePhoneImageCaption' || actionConfig.actionId === 'describeInputImage')
     ) {
       const requiredImageId = captionState?.imageId || 'new_image';
       const requiredImageAction = captionState?.requiredImageAction === 'no_change_or_update'
         ? 'no_change, or update only when explicit new context materially changes the existing caption'
         : captionState?.requiredImageAction ?? 'create';
-      const correctionInstruction = [
-        'Your previous internal phone image caption JSON was invalid:',
-        output.text.trim() || '(empty output)',
-        '',
-        `RPGraph requires imageId "${requiredImageId}" and imageAction ${requiredImageAction}.`,
-        'Return exactly one corrected JSON object and nothing else.',
-        captionState?.requiredImageAction === 'update'
-          ? 'The current caption is missing. Use imageAction "update" and include a 20 to 30 word caption.'
-          : captionState?.requiredImageAction === 'create'
-            ? 'Use imageAction "create" with imageId "new_image" and include a 20 to 30 word caption.'
-            : `The current caption is: ${captionState?.currentCaption ?? '(none)'}`,
-      ].join('\n');
+      const correctionInstruction = actionConfig.actionId === 'describeInputImage'
+        ? [
+            'Your previous internal image caption JSON was invalid:',
+            output.text.trim() || '(empty output)',
+            '',
+            'Return exactly one corrected JSON object and nothing else:',
+            '',
+            '{',
+            '"action": "describe_input_image",',
+            '"caption": "20 to 30 word RP scene snapshot"',
+            '}',
+          ].join('\n')
+        : [
+            'Your previous internal phone image caption JSON was invalid:',
+            output.text.trim() || '(empty output)',
+            '',
+            `RPGraph requires imageId "${requiredImageId}" and imageAction ${requiredImageAction}.`,
+            'Return exactly one corrected JSON object and nothing else.',
+            captionState?.requiredImageAction === 'update'
+              ? 'The current caption is missing. Use imageAction "update" and include a 20 to 30 word caption.'
+              : captionState?.requiredImageAction === 'create'
+                ? 'Use imageAction "create" with imageId "new_image" and include a 20 to 30 word caption.'
+                : `The current caption is: ${captionState?.currentCaption ?? '(none)'}`,
+          ].join('\n');
       const correctionLabel = `${passLabel} correction`;
       promptPasses.push({
         label: correctionLabel,

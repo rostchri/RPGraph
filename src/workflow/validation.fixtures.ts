@@ -5016,6 +5016,57 @@ async function verifyPromptRunFixtures() {
     'a premature after-reply caption call must keep the visible reply and append the image metadata',
   );
 
+  const describeCorrectionWarnings: string[] = [];
+  const describeCorrectionPrompts: string[] = [];
+  const describeCorrectionOutputs = [
+    'Espen laughs and hands the phone back.',
+    'Ryan and Espen share a look at the party.',
+    '{"action":"describe_input_image","caption":"Ryan and Espen share a look at the party."}',
+  ];
+  let describeCorrectionCalls = 0;
+  const describeCorrectionContext = {
+    ...context,
+    llm: {
+      supportsVision: async () => true,
+      complete: async ({ prompt }: { prompt: string }) => {
+        describeCorrectionCalls += 1;
+        describeCorrectionPrompts.push(prompt);
+        return {
+          text: describeCorrectionOutputs.shift() ?? '',
+          connection: { label: 'Fixture LLM' },
+        };
+      },
+    },
+    reportWarning: (message: string) => describeCorrectionWarnings.push(message),
+  } as unknown as ExecuteContext;
+  const describeCorrectionResult = await runActionAwarePrompt({
+    node,
+    context: describeCorrectionContext,
+    inputValue: 'Helga shows the picture.',
+    images: [{
+      id: 'img-1',
+      name: 'RP_Picture_01',
+      mimeType: 'image/png',
+      size: 1,
+      dataUrl: 'data:image/png;base64,a',
+    }],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: 'Write the story.\n\n@action:Describe input image (After Reply Action)',
+    actionConfigs: [defaultPromptActionConfig('Describe input image', 'describeInputImage')],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+  });
+  assertFixture(
+    describeCorrectionCalls === 3 &&
+      describeCorrectionWarnings.length === 0 &&
+      describeCorrectionPrompts[2]?.includes('previous internal image caption JSON was invalid') &&
+      describeCorrectionResult.generatedText.startsWith('Espen laughs and hands the phone back.') &&
+      describeCorrectionResult.generatedText.includes('"image": "Ryan and Espen share a look at the party."'),
+    'an invalid describe-input-image caption must trigger one focused correction pass without warnings',
+  );
+
   const captionCorrectionWarnings: string[] = [];
   const captionCorrectionPrompts: string[] = [];
   const captionCorrectionOutputs = [
