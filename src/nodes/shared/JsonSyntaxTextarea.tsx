@@ -45,6 +45,7 @@ type JsonSyntaxTextareaProps = {
   readOnly?: boolean;
   disabled?: boolean;
   wrap?: 'hard' | 'soft' | 'off';
+  highlightPlainText?: boolean;
   workflowVariableDefinitions?: SettingsValueDefinition[];
   workflowVariableValues?: Record<string, string>;
   templateVariableStatuses?: Record<string, 'active' | 'inactive'>;
@@ -609,6 +610,7 @@ export function JsonSyntaxTextarea({
   readOnly,
   disabled,
   wrap,
+  highlightPlainText = false,
   workflowVariableDefinitions = [],
   workflowVariableValues = {},
   templateVariableStatuses,
@@ -678,7 +680,7 @@ export function JsonSyntaxTextarea({
     () => /@step:[ \t]*[A-Za-z0-9_-]+\b/i.test(value) || /@output:[A-Za-z0-9_-]+\b/i.test(value),
     [value],
   );
-  const highlightActive = jsonHighlightActive || workflowVariableHighlightActive || promptActionHighlightActive || templateVariableHighlightActive || stepHighlightActive;
+  const highlightActive = highlightPlainText || jsonHighlightActive || workflowVariableHighlightActive || promptActionHighlightActive || templateVariableHighlightActive || stepHighlightActive;
 
   const tokenClassName = (token: HighlightToken) => {
     if (

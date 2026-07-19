@@ -1694,7 +1694,7 @@ export function ChatConversationPanel({
                           style={{ fontSize: chatTextSize || defaultChatTextSize }}
                         >
                           {compositeTextBefore && (
-                            <span className="message-composite-text">
+                            <span className="message-composite-text chat-reading-stripes">
                               {renderDialogueTextParts(stripRecognizedSpeakerLabels(compositeTextBefore, speakerNames), 'before')}
                             </span>
                           )}
@@ -1716,7 +1716,7 @@ export function ChatConversationPanel({
                             </Fragment>
                           ))}
                           {compositeTextAfter && (
-                            <span className="message-composite-text">
+                            <span className="message-composite-text chat-reading-stripes">
                               {renderDialogueTextParts(stripRecognizedSpeakerLabels(compositeTextAfter, speakerNames), 'after')}
                             </span>
                           )}
@@ -1726,7 +1726,9 @@ export function ChatConversationPanel({
                         </div>
                       ) : (visibleText || message.rpDateTime) && (
                         <p style={{ fontSize: chatTextSize || defaultChatTextSize }}>
-                          {renderDialoguePartSpans(parts, 'main')}
+                          <span className="chat-reading-stripes">
+                            {renderDialoguePartSpans(parts, 'main')}
+                          </span>
                           {rpTimeTrackingEnabled &&
                             !message.eventInput &&
                             renderRpTime(message.rpDateTime, 'message-rp-time')}
