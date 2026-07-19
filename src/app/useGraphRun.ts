@@ -1029,7 +1029,7 @@ export function useGraphRun(options: UseGraphRunOptions) {
       existingInputMessage?.phoneTo ?? phoneRecipientCharacterOverride?.name ?? selectedPhoneContact?.character.name;
     const rawSentPhoneImages = existingInputMessage?.imageAttachments ?? inputImages;
     const sentPhoneImages =
-      !existingInputMessage && isPhoneMessage && phoneRecipientName && rawSentPhoneImages.length
+      isPhoneMessage && phoneRecipientName && rawSentPhoneImages.length
         ? ensurePhoneImagesInStorybooks(
             inputCharacterName,
             phoneRecipientName,
@@ -1037,7 +1037,9 @@ export function useGraphRun(options: UseGraphRunOptions) {
             imageDescriptionFromAttachments(rawSentPhoneImages),
           ) ?? rawSentPhoneImages
         : rawSentPhoneImages;
-    if (sentPhoneImages !== rawSentPhoneImages) {
+    if (isPhoneMessage && phoneRecipientName && rawSentPhoneImages.length) {
+      // Ensuring may have added only a recipient copy while returning the same
+      // attachment array, so refresh from nodesRef whenever the ensure ran.
       executionNodes = nodesRef.current;
     }
     const rpInputImageName =

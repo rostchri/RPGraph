@@ -130,6 +130,12 @@ function promptActionInstructionVariableStatuses(
   if (config.runAfterReply) {
     statuses.reply = 'active';
     statuses.response = 'active';
+    if (config.actionId === 'updatePhoneImageCaption') {
+      statuses.imageId = 'active';
+      statuses.currentCaption = 'active';
+      statuses.captionStatus = 'active';
+      statuses.requiredImageAction = 'active';
+    }
   }
   return Object.keys(statuses).length ? statuses : undefined;
 }

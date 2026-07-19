@@ -1869,14 +1869,20 @@ export function verifyWorkflowValidationFixtures() {
   );
   assertFixture(
       updatePhoneImageCaptionDefaults.runAfterReply &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('Image ID: {{imageId}}') &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('Current caption: {{currentCaption}}') &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('Caption status: {{captionStatus}}') &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('Required imageAction: {{requiredImageAction}}') &&
       updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('"imageAction": "no_change"') &&
       updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('"imageId": "exact existing imageId"') &&
       updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('imageAction "no_change" is the default') &&
-      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('The visible phone reply is not new evidence by itself') &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('An explicit factual confirmation in the visible phone reply is reliable new evidence') &&
+      updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('if the current caption says "a young man" and the reply confirms "that was Jack," replace "a young man" with Jack') &&
       updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('Forwarding or resending the existing image to another person must not trigger an update') &&
       updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('If there is no clear new fact') &&
+      !updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('The visible phone reply is not new evidence by itself') &&
       !updatePhoneImageCaptionDefaults.afterReplyTemplate.includes('the latest messages or the visible phone reply establish story-relevant new information'),
-    'after-reply phone image captions must default to no change unless explicit new facts materially change the image meaning',
+    'after-reply phone image captions must use explicit factual confirmations while rejecting guesses and cosmetic rewrites',
   );
   assertFixture(
     countPromptActionUses([
@@ -5008,6 +5014,167 @@ async function verifyPromptRunFixtures() {
     result.generatedText.startsWith('Espen grins and grabs the phone.') &&
       result.generatedText.includes('"image": "Ryan and Espen share a look at the party."'),
     'a premature after-reply caption call must keep the visible reply and append the image metadata',
+  );
+
+  const captionCorrectionWarnings: string[] = [];
+  const captionCorrectionPrompts: string[] = [];
+  const captionCorrectionOutputs = [
+    '{"whatsUpApp":[{"from":"Espen Harper","to":"Helga Harper","message":"You look ready."}]}',
+    '{"action":"update_phone_image_caption","imageId":"helga_harper_image_06","imageAction":"no_change"}',
+    '{"action":"update_phone_image_caption","imageId":"helga_harper_image_06","imageAction":"update","caption":"Helga Harper poses at home after finishing her makeup, ready for the party while Espen Harper is still buying drinks and snacks."}',
+  ];
+  let captionCorrectionCalls = 0;
+  const captionCorrectionContext = {
+    nodes: [],
+    edges: [],
+    historyMessages: [],
+    comfyProviderIds: [],
+    providerHealthById: {},
+    llm: {
+      supportsVision: async () => true,
+      complete: async ({ prompt }: { prompt: string }) => {
+        captionCorrectionCalls += 1;
+        captionCorrectionPrompts.push(prompt);
+        return {
+          text: captionCorrectionOutputs.shift() ?? '',
+          connection: { label: 'Fixture LLM' },
+        };
+      },
+    },
+    reportWarning: (message: string) => captionCorrectionWarnings.push(message),
+    updateRuntimeData: () => {},
+  } as unknown as ExecuteContext;
+  const captionCorrectionResult = await runActionAwarePrompt({
+    node,
+    context: captionCorrectionContext,
+    inputValue: 'Helga Harper sends an image to Espen Harper: [Attached input image Nr1: helga_harper_image_06] I am ready.',
+    images: [{
+      id: 'helga_harper_image_06',
+      name: 'helga_harper_image_06',
+      mimeType: 'image/jpeg',
+      size: 1,
+      dataUrl: 'data:image/jpeg;base64,new-phone-image',
+    }],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: 'Reply with one phone message.\n\n@action:Update phone image caption (After Reply Action)',
+    actionConfigs: [defaultPromptActionConfig('Update phone image caption', 'updatePhoneImageCaption')],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+  });
+  assertFixture(
+    captionCorrectionCalls === 3 &&
+      captionCorrectionWarnings.length === 0 &&
+      captionCorrectionPrompts[1]?.includes('Image ID: helga_harper_image_06') &&
+      captionCorrectionPrompts[1]?.includes('Current caption: (none)') &&
+      captionCorrectionPrompts[1]?.includes('Caption status: missing') &&
+      captionCorrectionPrompts[1]?.includes('Required imageAction: update') &&
+      captionCorrectionPrompts[2]?.includes('previous internal phone image caption JSON was invalid') &&
+      captionCorrectionResult.generatedText.includes('"imageAction": "update"') &&
+      captionCorrectionResult.generatedText.includes('Helga Harper poses at home'),
+    'an uncaptioned phone image must expose its concrete state and reject no_change with one focused correction pass',
+  );
+
+  const existingCaptionPrompts: string[] = [];
+  const existingCaptionOutputs = [
+    '{"whatsUpApp":[{"from":"Espen Harper","to":"Helga Harper","message":"Still looks good."}]}',
+    '{"action":"update_phone_image_caption","imageId":"helga_harper_image_06","imageAction":"no_change"}',
+  ];
+  let existingCaptionCalls = 0;
+  const existingCaptionContext = {
+    ...captionCorrectionContext,
+    llm: {
+      supportsVision: async () => true,
+      complete: async ({ prompt }: { prompt: string }) => {
+        existingCaptionCalls += 1;
+        existingCaptionPrompts.push(prompt);
+        return {
+          text: existingCaptionOutputs.shift() ?? '',
+          connection: { label: 'Fixture LLM' },
+        };
+      },
+    },
+  } as unknown as ExecuteContext;
+  const existingCaption = 'Helga Harper poses in a mirror wearing a black top and grey sweatpants while getting ready for the party.';
+  const existingCaptionResult = await runActionAwarePrompt({
+    node,
+    context: existingCaptionContext,
+    inputValue: `Helga Harper sends an image to Espen Harper: [helga_harper_image_06: ${existingCaption}] Still okay?`,
+    images: [{
+      id: 'helga_harper_image_06',
+      name: 'helga_harper_image_06',
+      mimeType: 'image/jpeg',
+      size: 1,
+      dataUrl: 'data:image/jpeg;base64,existing-phone-image',
+    }],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: 'Reply with one phone message.\n\n@action:Update phone image caption (After Reply Action)',
+    actionConfigs: [defaultPromptActionConfig('Update phone image caption', 'updatePhoneImageCaption')],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+  });
+  assertFixture(
+    existingCaptionCalls === 2 &&
+      existingCaptionPrompts[1]?.includes(`Current caption: ${existingCaption}`) &&
+      existingCaptionPrompts[1]?.includes('Caption status: present') &&
+      existingCaptionPrompts[1]?.includes('Required imageAction: no_change_or_update') &&
+      existingCaptionResult.generatedText.includes('"imageAction": "no_change"'),
+    'an existing phone image caption must be shown explicitly and accept no_change without a correction pass',
+  );
+
+  const wrongImageIdWarnings: string[] = [];
+  const wrongImageIdPrompts: string[] = [];
+  const wrongImageIdOutputs = [
+    '{"whatsUpApp":[{"from":"Espen Harper","to":"Helga Harper","message":"Nice one."}]}',
+    '{"action":"update_phone_image_caption","imageId":"some_other_image_02","imageAction":"no_change"}',
+    '{"action":"update_phone_image_caption","imageId":"helga_harper_image_06","imageAction":"no_change"}',
+  ];
+  let wrongImageIdCalls = 0;
+  const wrongImageIdContext = {
+    ...captionCorrectionContext,
+    llm: {
+      supportsVision: async () => true,
+      complete: async ({ prompt }: { prompt: string }) => {
+        wrongImageIdCalls += 1;
+        wrongImageIdPrompts.push(prompt);
+        return {
+          text: wrongImageIdOutputs.shift() ?? '',
+          connection: { label: 'Fixture LLM' },
+        };
+      },
+    },
+    reportWarning: (message: string) => wrongImageIdWarnings.push(message),
+  } as unknown as ExecuteContext;
+  const wrongImageIdResult = await runActionAwarePrompt({
+    node,
+    context: wrongImageIdContext,
+    inputValue: `Helga Harper sends an image to Espen Harper: [helga_harper_image_06: ${existingCaption}] Look again.`,
+    images: [{
+      id: 'helga_harper_image_06',
+      name: 'helga_harper_image_06',
+      mimeType: 'image/jpeg',
+      size: 1,
+      dataUrl: 'data:image/jpeg;base64,existing-phone-image',
+    }],
+    referenceImages: [],
+    promptBefore: '',
+    promptAfter: 'Reply with one phone message.\n\n@action:Update phone image caption (After Reply Action)',
+    actionConfigs: [defaultPromptActionConfig('Update phone image caption', 'updatePhoneImageCaption')],
+    streamsVisibleOutput: false,
+    contributesToTokenCalibration: false,
+    callLabel: () => 'Fixture call',
+  });
+  assertFixture(
+    wrongImageIdCalls === 3 &&
+      wrongImageIdWarnings.length === 0 &&
+      wrongImageIdPrompts[2]?.includes('RPGraph requires imageId "helga_harper_image_06"') &&
+      wrongImageIdPrompts[2]?.includes('no_change, or update only when explicit new context materially changes the existing caption') &&
+      wrongImageIdResult.generatedText.includes('"imageId": "helga_harper_image_06"') &&
+      wrongImageIdResult.generatedText.includes('"imageAction": "no_change"'),
+    'a caption call with a wrong imageId must trigger one correction pass that enforces the real imageId',
   );
 
   const socialReplayPrompts: string[] = [];

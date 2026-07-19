@@ -232,10 +232,19 @@ const previousUpdatePhoneImageCaptionAfterReplyDecisionRules = [
   'Use imageAction "no_change" with the exact existing imageId in every other case. When in doubt, choose "no_change".',
 ].join('\n');
 
-const updatePhoneImageCaptionAfterReplyDecisionRules = [
+const previousUpdatePhoneImageCaptionAfterReplyDecisionRulesWithReplyExcluded = [
   'For an image that already has a caption, imageAction "no_change" is the default.',
   'Use imageAction "update" with the exact existing imageId only when the phone/chat/story context explicitly establishes a new fact about the pictured moment that was not known when the current caption was written and materially changes its meaning. Valid examples are a previously unknown person being explicitly identified, or a confirmed event, relationship, location, situation, or intent that changes what the image represents.',
   'The visible phone reply is not new evidence by itself. A reaction, compliment, guess, inference, paraphrase, or more detailed description of already visible content must not trigger an update. Forwarding or resending the existing image to another person must not trigger an update.',
+  'Do not update for minor visible details, improved wording, extra atmosphere, inferred emotions, or information already stated or implied by the current caption.',
+  'Before choosing "update", compare the exact new fact with the current caption. If there is no clear new fact, or the existing caption remains accurate and useful without it, use "no_change".',
+].join('\n');
+
+const updatePhoneImageCaptionAfterReplyDecisionRules = [
+  'For an image that already has a caption, imageAction "no_change" is the default.',
+  'Use imageAction "update" with the exact existing imageId only when the phone/chat/story context explicitly establishes a new fact about the pictured moment that was not known when the current caption was written and materially changes its meaning. Valid examples are a previously unknown person being explicitly identified, or a confirmed event, relationship, location, situation, or intent that changes what the image represents.',
+  'An explicit factual confirmation in the visible phone reply is reliable new evidence. If the reply directly identifies a previously unidentified person, place, event, relationship, situation, or intent in the image, update the caption with that confirmed fact. Example: if the current caption says "a young man" and the reply confirms "that was Jack," replace "a young man" with Jack.',
+  'A reaction, compliment, guess, inference, question, paraphrase, or more detailed description of already visible content is not new evidence and must not trigger an update. Forwarding or resending the existing image to another person must not trigger an update.',
   'Do not update for minor visible details, improved wording, extra atmosphere, inferred emotions, or information already stated or implied by the current caption.',
   'Before choosing "update", compare the exact new fact with the current caption. If there is no clear new fact, or the existing caption remains accurate and useful without it, use "no_change".',
 ].join('\n');
@@ -245,6 +254,15 @@ const previousUpdatePhoneImageCaptionAfterReplyWritingRule =
 
 const updatePhoneImageCaptionAfterReplyWritingRule =
   'For create/update, write one concise 20 to 30 word caption. Combine visible image details with reliable facts explicitly established by recent phone/chat/story context. Avoid metadata, filenames, image-generation wording, guesses, and uncertainty about identity.';
+
+const updatePhoneImageCaptionAfterReplyImageState = [
+  'Incoming image state (supplied by RPGraph):',
+  'Image ID: {{imageId}}',
+  'Current caption: {{currentCaption}}',
+  'Caption status: {{captionStatus}}',
+  'Required imageAction: {{requiredImageAction}}',
+  'Follow the required imageAction exactly. RPGraph has already determined whether this image needs its first caption.',
+].join('\n');
 
 const previousUpdatePhoneImageCaptionAfterReplyExample = [
   '{',
@@ -276,6 +294,8 @@ export const updatePhoneImageCaptionAfterReplyInstruction = [
   '{{reply}}',
   '',
   'Now record the internal caption/create/update/no-change decision for that incoming image. Output exactly one JSON object and nothing else:',
+  '',
+  updatePhoneImageCaptionAfterReplyImageState,
   '',
   updatePhoneImageCaptionAfterReplyExample,
   '',
@@ -489,10 +509,35 @@ const previousUpdatePhoneImageCaptionAfterReplyInstruction = updatePhoneImageCap
     previousUpdatePhoneImageCaptionAfterReplyWritingRule,
   );
 
+const previousUpdatePhoneImageCaptionAfterReplyInstructionWithReplyExcluded =
+  updatePhoneImageCaptionAfterReplyInstruction.replace(
+    updatePhoneImageCaptionAfterReplyDecisionRules,
+    previousUpdatePhoneImageCaptionAfterReplyDecisionRulesWithReplyExcluded,
+  );
+
 const previousUpdatePhoneImageCaptionAfterReplyInstructions = new Set([
+  previousUpdatePhoneImageCaptionAfterReplyInstructionWithReplyExcluded,
+  previousUpdatePhoneImageCaptionAfterReplyInstructionWithReplyExcluded.replace(
+    `${updatePhoneImageCaptionAfterReplyImageState}\n\n`,
+    '',
+  ),
+  previousUpdatePhoneImageCaptionAfterReplyInstructionWithReplyExcluded
+    .replace(`${updatePhoneImageCaptionAfterReplyImageState}\n\n`, '')
+    .replace(`\n${updatePhoneImageCaptionMissingCaptionRule}`, ''),
+  updatePhoneImageCaptionAfterReplyInstruction.replace(
+    `${updatePhoneImageCaptionAfterReplyImageState}\n\n`,
+    '',
+  ),
   updatePhoneImageCaptionAfterReplyInstruction.replace(`\n${updatePhoneImageCaptionMissingCaptionRule}`, ''),
   previousUpdatePhoneImageCaptionAfterReplyInstruction,
+  previousUpdatePhoneImageCaptionAfterReplyInstruction.replace(
+    `${updatePhoneImageCaptionAfterReplyImageState}\n\n`,
+    '',
+  ),
   previousUpdatePhoneImageCaptionAfterReplyInstruction
+    .replace(`\n${updatePhoneImageCaptionMissingCaptionRule}`, ''),
+  previousUpdatePhoneImageCaptionAfterReplyInstruction
+    .replace(`${updatePhoneImageCaptionAfterReplyImageState}\n\n`, '')
     .replace(`\n${updatePhoneImageCaptionMissingCaptionRule}`, ''),
 ]);
 
@@ -1261,10 +1306,59 @@ export function promptActionInstructionText(
 export function promptActionAfterReplyText(
   config: PromptActionConfig,
   reply: string,
+  imageState?: PhoneImageCaptionPromptState,
 ) {
-  return config.afterReplyTemplate
-    .split('{{reply}}').join(reply)
-    .split('{{response}}').join(reply);
+  const imageId = imageState?.imageId || 'new_image';
+  const currentCaption = imageState?.currentCaption || '(none)';
+  const captionStatus = imageState?.currentCaption ? 'present' : 'missing';
+  const requiredImageAction = imageState?.requiredImageAction ?? 'create';
+  const values: Record<string, string> = {
+    reply,
+    response: reply,
+    imageId,
+    currentCaption,
+    captionStatus,
+    requiredImageAction,
+  };
+  return config.afterReplyTemplate.replace(
+    /\{\{(reply|response|imageId|currentCaption|captionStatus|requiredImageAction)\}\}/g,
+    (_match, name: string) => values[name] ?? '',
+  );
+}
+
+export type PhoneImageCaptionPromptState = {
+  imageId: string;
+  currentCaption?: string;
+  requiredImageAction: 'create' | 'update' | 'no_change_or_update';
+};
+
+export function phoneImageCaptionPromptState(
+  nodes: WorkflowNode[],
+  inputImage: ChatImageAttachment | undefined,
+  inputText = '',
+): PhoneImageCaptionPromptState {
+  const imageId = inputImage?.id.trim() ?? '';
+  const attachmentCaption = inputImage?.description?.trim();
+  const storedImages = storybookImageListsFromNodes(nodes).flatMap((list) => list.images);
+  const storedImage = storedImages.find((image) =>
+    imageId && image.id === imageId && image.dataUrl === inputImage?.dataUrl
+  ) ?? storedImages.find((image) => imageId && image.id === imageId);
+  const escapedImageId = imageId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const markedCaption = escapedImageId
+    ? inputText.match(
+        new RegExp(`\\[Attached input image Nr\\d+:\\s*${escapedImageId}\\s+-\\s*([^\\]]+)\\]`),
+      )?.[1]?.trim()
+    : undefined;
+  const currentCaption = storedImage?.description.trim() || attachmentCaption || markedCaption || undefined;
+  return {
+    imageId,
+    currentCaption,
+    requiredImageAction: !imageId
+      ? 'create'
+      : currentCaption
+        ? 'no_change_or_update'
+        : 'update',
+  };
 }
 
 function parsePromptActionRecord(parsed: unknown): ParsedPromptActionCall | undefined {
