@@ -191,14 +191,19 @@ export function sessionV2FromCurrentState(
   savedAt = new Date().toISOString(),
 ): RpgraphSessionV2 {
   const entities = entitiesFromCurrentState(runtimeNodes, state.turns);
+  const mediaWriter = createMediaPoolWriter();
   const timeline = [
-    ...timelineFromTurnRecordsWithOpeningMessages(state.turns, state.openingMessages, savedAt),
+    ...timelineFromTurnRecordsWithOpeningMessages(
+      state.turns,
+      state.openingMessages,
+      savedAt,
+      mediaWriter.mediaRefForDataUrl,
+    ),
     ...eventTimelineEntriesFromEntities(entities.events),
   ];
   const debug = debugStateFromNodes(runtimeNodes, savedAt);
-  // Runtime and undo storybook copies share their media through one pool; the
-  // embedded workflow keeps the only full storybook copy in the save.
-  const mediaWriter = createMediaPoolWriter();
+  // Timeline voice clips and runtime/undo storybook copies share one media
+  // pool; the embedded workflow keeps the only full storybook copy in the save.
   const redactedRuntime = runtimeStateWithConvertedStorybooks(
     runtimeStateFromNodes(runtimeNodes, state.workflowVariables),
     mediaWriter.redactedStorybookJson,
@@ -260,6 +265,7 @@ function chatMessageFromTimelineEntry(
   numericId: number,
   messageIdsByTimelineId: Map<string, number>,
   session: RpgraphSessionV2,
+  dataUrlForMediaRef: (ref: string) => string,
 ): MessageRecord {
   const imageAttachments = entry.images
     ?.map((ref) => session.entities.images[ref.imageId])
@@ -360,7 +366,10 @@ function chatMessageFromTimelineEntry(
     turnPart: entry.phase,
     rpDateTime: entry.rpDateTime,
     workflowVariableSetCommands: entry.workflowVariableSetCommands,
-    voiceClips: entry.voiceClips,
+    voiceClips: entry.voiceClips?.map(({ mediaRef, ...clip }) => ({
+      ...clip,
+      dataUrl: dataUrlForMediaRef(mediaRef),
+    })),
     bankTransfer: entry.bankTransfer,
     socialPost: entry.socialPost,
     socialThreadAction: entry.socialThreadAction,
@@ -402,6 +411,7 @@ export function appStateFromSessionV2(session: RpgraphSessionV2): SessionV2AppSt
       messageIdsByTimelineId.get(entry.id) ?? 0,
       messageIdsByTimelineId,
       session,
+      mediaReader.dataUrlForMediaRef,
     ),
   );
   const turnMetadataByTurnId = new Map(

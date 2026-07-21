@@ -84,7 +84,9 @@ function isTimelineEntry(value: unknown): value is TimelineEntry {
         isRecord(clip) &&
         (typeof clip.speakerName === 'string' || clip.speakerName === null) &&
         typeof clip.text === 'string' &&
-        isAudioDataUrl(clip.dataUrl) &&
+        typeof clip.mediaRef === 'string' &&
+        /^media-\d+$/.test(clip.mediaRef) &&
+        clip.dataUrl === undefined &&
         (clip.filename === undefined || typeof clip.filename === 'string') &&
         (
           clip.source === undefined ||
@@ -296,6 +298,17 @@ function isMediaDataRecord(value: unknown) {
   );
 }
 
+function hasValidVoiceClipMediaReferences(
+  timeline: TimelineEntry[],
+  mediaData: unknown,
+) {
+  const pool = isRecord(mediaData) ? mediaData : {};
+  return timeline.every((entry) =>
+    entry.kind !== 'message' ||
+    (entry.voiceClips ?? []).every((clip) => isAudioDataUrl(pool[clip.mediaRef]))
+  );
+}
+
 function isNumberRecord(value: unknown) {
   return (
     isRecord(value) &&
@@ -498,6 +511,7 @@ export function isRpgraphSessionV2(value: unknown): value is RpgraphSessionV2 {
     isEventEntityRecord(value.entities.events) &&
     isMemoryEntityRecord(value.entities.memory) &&
     (value.entities.mediaData === undefined || isMediaDataRecord(value.entities.mediaData)) &&
+    hasValidVoiceClipMediaReferences(value.timeline, value.entities.mediaData) &&
     isRecord(value.runtime) &&
     isRecord(value.runtime.current) &&
     isWorkflowVariableRecord(value.runtime.current.workflowVariables) &&

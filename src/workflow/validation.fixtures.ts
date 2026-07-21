@@ -47,7 +47,7 @@ import {
   openingHistorySocialConnectionsFromNodes,
   openingHistorySocialLikesFromNodes,
   openingHistoryTurnsFromNodes,
-  turnsWithStorybookImageRefs,
+  turnsForStorybookOpeningHistory,
   remapOpeningTurnMessageIds,
 } from '../storybook/openingHistoryRuntime';
 import {
@@ -1700,6 +1700,12 @@ export function verifyWorkflowValidationFixtures() {
         phoneImageIds: ['emily_miller_image_01'],
         phoneImageDescription: 'Emily at the party.',
         imageAttachments: [openingImageAttachment],
+        voiceClips: [{
+          speakerName: 'Emily Miller',
+          text: 'Phone image',
+          dataUrl: 'data:audio/mpeg;base64,QUJD',
+          source: 'dialogue',
+        }],
       }],
     },
   }, {
@@ -1792,9 +1798,9 @@ export function verifyWorkflowValidationFixtures() {
     throw new Error('Workflow validation fixture failed: default Storybook node is missing');
   }
   // Import stores gallery-backed images as id-only references (no base64
-  // copy); attachments without a gallery entry keep their embedded data.
+  // copy), keeps unknown attachments, and drops regenerable voice clips.
   openingHistoryNode.data.storybookJson = rpStorybookJsonText(openingHistoryStorybook);
-  openingHistoryStorybook.openingHistory.turns = turnsWithStorybookImageRefs(
+  openingHistoryStorybook.openingHistory.turns = turnsForStorybookOpeningHistory(
     openingHistoryStorybook.openingHistory.turns,
     [openingHistoryNode],
   );
@@ -1804,6 +1810,12 @@ export function verifyWorkflowValidationFixtures() {
     storedOpeningAttachment?.id === 'emily_miller_image_01' &&
       storedOpeningAttachment.dataUrl === '',
     'importing the current chat must strip gallery-backed image copies to id references',
+  );
+  assertFixture(
+    openingHistoryStorybook.openingHistory.turns.every((turn) =>
+      [...turn.input.messages, ...turn.output.messages].every((message) => !message.voiceClips)
+    ),
+    'importing the current chat must discard generated voice clips from Opening History',
   );
   openingHistoryNode.data.storybookJson = rpStorybookJsonText(openingHistoryStorybook);
   const restoredOpeningMessages = openingHistoryTurnsFromNodes([openingHistoryNode])
@@ -2380,6 +2392,12 @@ export function verifyWorkflowValidationFixtures() {
           phoneTo: 'Alice',
           phoneImageIds: ['bob_image_01'],
           phoneImageDescription: 'Bob waving from the bus stop.',
+          voiceClips: [{
+            speakerName: 'Bob',
+            text: 'Ping from Bob',
+            dataUrl: 'data:audio/mpeg;base64,QUJD',
+            source: 'phone',
+          }],
           turnId: 'turn-1',
           turnNumber: 1,
           turnPart: 'output',
@@ -2429,6 +2447,12 @@ export function verifyWorkflowValidationFixtures() {
             filename: 'bob-voice.mp3',
             source: 'dialogue',
             createdAt: '2026-06-01T00:00:00.000Z',
+          }, {
+            speakerName: null,
+            text: 'Bob waves from the bus stop. Alice pockets her phone.',
+            dataUrl: 'data:audio/mpeg;base64,QUJD',
+            filename: 'narration.mp3',
+            source: 'narration',
           }],
         }, {
           id: 8,
@@ -2578,6 +2602,19 @@ export function verifyWorkflowValidationFixtures() {
       Object.values(sessionV2.entities.mediaData ?? {}).includes(roundtripDeletedImageDataUrl),
     'RP Save Format v2 must pool checkpoint and runtime storybook media once',
   );
+  const storedVoiceClips = sessionV2.timeline.flatMap((entry) =>
+    entry.kind === 'message' ? entry.voiceClips ?? [] : []
+  );
+  assertFixture(
+    storedVoiceClips.length === 3 &&
+      new Set(storedVoiceClips.map((clip) => clip.mediaRef)).size === 1 &&
+      serializedSessionV2.split('data:audio/mpeg;base64,QUJD').length - 1 === 1 &&
+      storedVoiceClips.every((clip) =>
+        !Object.prototype.hasOwnProperty.call(clip, 'dataUrl') &&
+        sessionV2.entities.mediaData?.[clip.mediaRef] === 'data:audio/mpeg;base64,QUJD'
+      ),
+    'RP Save Format v2 must store shared voice audio once and reference it from timeline clips',
+  );
   const invalidMediaPoolSession = structuredClone(sessionV2);
   invalidMediaPoolSession.entities.mediaData = { 'media-1': 'https://tracker.example/pixel.png' };
   assertFixture(
@@ -2593,8 +2630,8 @@ export function verifyWorkflowValidationFixtures() {
     danglingMediaRefFailed = true;
   }
   assertFixture(
-    danglingMediaRefFailed,
-    'RP Save Format v2 must fail loading when a media reference has no pooled data',
+    !isRpgraphSessionV2(danglingMediaRefSession) && danglingMediaRefFailed,
+    'RP Save Format v2 must reject and fail loading when a media reference has no pooled data',
   );
   const missingSocialDirectorySession = structuredClone(sessionV2);
   delete (missingSocialDirectorySession.ui as Partial<typeof missingSocialDirectorySession.ui>)
@@ -2648,16 +2685,17 @@ export function verifyWorkflowValidationFixtures() {
     !!externalImageId && !isRpgraphSessionV2(externalImageSession),
     'RP Save Format v2 must reject non-data image URLs',
   );
-  const externalVoiceSession = structuredClone(sessionV2);
-  const externalVoiceEntry = externalVoiceSession.timeline.find(
+  const invalidVoiceMediaSession = structuredClone(sessionV2);
+  const invalidVoiceEntry = invalidVoiceMediaSession.timeline.find(
     (entry): entry is TimelineMessageEntry => entry.kind === 'message' && !!entry.voiceClips?.length,
   );
-  if (externalVoiceEntry?.voiceClips?.[0]) {
-    externalVoiceEntry.voiceClips[0].dataUrl = 'https://tracker.example/clip.mp3';
+  const invalidVoiceRef = invalidVoiceEntry?.voiceClips?.[0]?.mediaRef;
+  if (invalidVoiceRef) {
+    invalidVoiceMediaSession.entities.mediaData![invalidVoiceRef] = 'data:image/jpeg;base64,AA==';
   }
   assertFixture(
-    !!externalVoiceEntry && !isRpgraphSessionV2(externalVoiceSession),
-    'RP Save Format v2 must reject non-data voice clip URLs',
+    !!invalidVoiceRef && !isRpgraphSessionV2(invalidVoiceMediaSession),
+    'RP Save Format v2 must reject voice clip references that resolve to non-audio media',
   );
   const invalidEventSession = structuredClone(sessionV2);
   const invalidEventId = Object.keys(invalidEventSession.entities.events)[0];
@@ -2771,10 +2809,13 @@ export function verifyWorkflowValidationFixtures() {
   );
   assertFixture(
     embeddedPhoneRoundtripMessage?.voiceClips?.[0]?.dataUrl === 'data:audio/mpeg;base64,QUJD' &&
+      embeddedPhoneRoundtripMessage.voiceClips[1]?.source === 'narration' &&
+      embeddedPhoneRoundtripLinkedPhone?.voiceClips?.[0]?.source === 'phone' &&
+      embeddedPhoneRoundtripLinkedPhone.voiceClips[0]?.dataUrl === 'data:audio/mpeg;base64,QUJD' &&
       sessionV2.timeline.find(
         (entry): entry is TimelineMessageEntry => entry.kind === 'message' && entry.id === 'turn-1-output-6',
-      )?.voiceClips?.[0]?.source === 'dialogue',
-    'RP Save Format v2 must store and restore generated voice clips',
+      )?.voiceClips?.every((clip) => clip.mediaRef === storedVoiceClips[0]?.mediaRef) === true,
+    'RP Save Format v2 must restore dialogue, narration, and phone voice clips from media references',
   );
   assertFixture(restoredAppState.openingMessages[0]?.originalText === 'Opening line', 'RP Save Format v2 must restore opening messages');
   assertFixture(

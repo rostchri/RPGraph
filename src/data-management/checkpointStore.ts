@@ -4,7 +4,7 @@ import {
   appointmentEntitiesFromAppointments,
   appointmentsFromEventEntities,
 } from './eventStore';
-import { timelineFromTurnRecords } from './timelineStore';
+import { turnTimelineEntryIds } from './timelineStore';
 import type { NodeDataPolicyByType, TurnCheckpoint } from './types';
 
 export const coreNodeDataPolicies: NodeDataPolicyByType = {
@@ -165,7 +165,7 @@ export function createTurnCheckpointFromNodesForTurnRecord(
     turn.id,
     beforeNodes,
     afterNodes,
-    timelineFromTurnRecords([turn]).map((entry) => entry.id),
+    turnTimelineEntryIds(turn),
     beforeWorkflowVariables,
     afterWorkflowVariables,
   );

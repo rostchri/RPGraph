@@ -22,7 +22,7 @@ import {
 } from '../data-management/eventStore';
 import { usedStorybookImageIdsRemoved } from './imageUsage';
 import { withChangedStorybookImageDescriptionsSynchronized } from './imageLibrary';
-import { turnsWithStorybookImageRefs } from './openingHistoryRuntime';
+import { turnsForStorybookOpeningHistory } from './openingHistoryRuntime';
 import storybookFormatVersions from './formatVersions.json';
 import {
   convertLegacyRpStorybook,
@@ -473,9 +473,7 @@ export function useStorybookActions({
     const storybook = node.data.storybookJson
       ? parseRpStorybookJson(node.data.storybookJson)
       : emptyRpStorybook;
-    // Images that live in a Storybook gallery are stored as id-only
-    // references instead of embedded copies; loading resolves them again.
-    const historyTurns = turnsWithStorybookImageRefs(
+    const historyTurns = turnsForStorybookOpeningHistory(
       turnsRef.current.map((turn) => {
         const { openingHistory: _openingHistory, ...storedTurn } = structuredClone(turn);
         return storedTurn;

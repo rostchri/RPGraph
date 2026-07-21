@@ -29,32 +29,33 @@ function storybooksFromNodes(nodes: WorkflowNode[]): RpStorybook[] {
 }
 
 /**
- * Replace stored image copies on turn messages with id-only references.
- * Images live once in the Storybook image library; a stored message keeps its
- * attachment metadata but drops the base64 data when the image id resolves in
- * the library. Attachments whose id is unknown keep their embedded copy so
- * nothing is lost.
+ * Prepare runtime turns for storage in Storybook Opening History.
+ * Gallery-backed images become id-only references, while generated voice clips
+ * are discarded because they are a regenerable runtime cache with no Storybook
+ * media-library reference. Unknown image attachments keep their embedded copy
+ * so their content is not lost.
  */
-export function turnsWithStorybookImageRefs(
+export function turnsForStorybookOpeningHistory(
   turns: TurnRecord[],
   nodes: WorkflowNode[],
 ): TurnRecord[] {
   const storybooks = storybooksFromNodes(nodes);
-  const withImageRefs = (message: MessageRecord): MessageRecord => {
-    if (!message.imageAttachments?.length) {
-      return message;
+  const forOpeningHistory = (message: MessageRecord): MessageRecord => {
+    const { voiceClips: _voiceClips, ...storedMessage } = message;
+    if (!storedMessage.imageAttachments?.length) {
+      return storedMessage;
     }
     return {
-      ...message,
-      imageAttachments: message.imageAttachments.map((image) =>
+      ...storedMessage,
+      imageAttachments: storedMessage.imageAttachments.map((image) =>
         storybookImageSourceById(storybooks, image.id) ? { ...image, dataUrl: '' } : image,
       ),
     };
   };
   return turns.map((turn) => ({
     ...turn,
-    input: { ...turn.input, messages: turn.input.messages.map(withImageRefs) },
-    output: { ...turn.output, messages: turn.output.messages.map(withImageRefs) },
+    input: { ...turn.input, messages: turn.input.messages.map(forOpeningHistory) },
+    output: { ...turn.output, messages: turn.output.messages.map(forOpeningHistory) },
   }));
 }
 

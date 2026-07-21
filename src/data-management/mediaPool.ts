@@ -1,10 +1,10 @@
 /**
- * Deduplicates embedded media (base64 `data:` URLs) in storybook runtime
- * snapshots at the session serialization boundary. Undo checkpoints and the
- * current runtime snapshot each contain full `storybookJson` copies; their
- * media strings are moved into one shared pool (`entities.mediaData`) and
- * replaced by `rpgraph-data-ref:<ref>` sentinels, so a saved session stores
- * every image and voice sample at most once outside the embedded workflow.
+ * Deduplicates embedded media (base64 `data:` URLs) at the session
+ * serialization boundary. Timeline voice clips store typed media references;
+ * media inside runtime and undo `storybookJson` snapshots is replaced by
+ * `rpgraph-data-ref:<ref>` sentinels. Both use one shared pool
+ * (`entities.mediaData`), so identical generated audio, images, and voice
+ * samples are stored at most once outside the embedded workflow.
  *
  * Redaction is plain text substitution, not JSON rewriting: base64 data URLs
  * contain no JSON escapes, so replacing them by sentinel text and back is an
@@ -31,20 +31,30 @@ export type MediaPool = Record<string, string>;
 export function createMediaPoolWriter() {
   const refByDataUrl = new Map<string, string>();
   const mediaData: MediaPool = {};
+  const mediaRefForDataUrl = (dataUrl: string): string => {
+    let ref = refByDataUrl.get(dataUrl);
+    if (!ref) {
+      ref = `media-${refByDataUrl.size + 1}`;
+      refByDataUrl.set(dataUrl, ref);
+      mediaData[ref] = dataUrl;
+    }
+    return ref;
+  };
   const redactedStorybookJson = (json: string): string =>
-    json.replace(mediaDataUrlPattern, (dataUrl) => {
-      let ref = refByDataUrl.get(dataUrl);
-      if (!ref) {
-        ref = `media-${refByDataUrl.size + 1}`;
-        refByDataUrl.set(dataUrl, ref);
-        mediaData[ref] = dataUrl;
-      }
-      return `${mediaRefPrefix}${ref}${mediaRefSuffix}`;
-    });
-  return { redactedStorybookJson, mediaData };
+    json.replace(mediaDataUrlPattern, (dataUrl) =>
+      `${mediaRefPrefix}${mediaRefForDataUrl(dataUrl)}${mediaRefSuffix}`
+    );
+  return { mediaRefForDataUrl, redactedStorybookJson, mediaData };
 }
 
 export function createMediaPoolReader(mediaData: MediaPool | undefined) {
+  const dataUrlForMediaRef = (ref: string): string => {
+    const dataUrl = mediaData?.[ref];
+    if (dataUrl === undefined) {
+      throw new Error(`The RP save is corrupted: media reference ${ref} has no stored data.`);
+    }
+    return dataUrl;
+  };
   // before(N+1) usually equals after(N); the cache keeps identical snapshots
   // as one rebuilt string instead of one multi-megabyte copy per checkpoint.
   const rehydratedByRedacted = new Map<string, string>();
@@ -57,14 +67,10 @@ export function createMediaPoolReader(mediaData: MediaPool | undefined) {
       return cached;
     }
     const result = json.replace(mediaRefPattern, (_sentinel, ref: string) => {
-      const dataUrl = mediaData?.[ref];
-      if (dataUrl === undefined) {
-        throw new Error(`The RP save is corrupted: media reference ${ref} has no stored data.`);
-      }
-      return dataUrl;
+      return dataUrlForMediaRef(ref);
     });
     rehydratedByRedacted.set(json, result);
     return result;
   };
-  return { rehydratedStorybookJson };
+  return { dataUrlForMediaRef, rehydratedStorybookJson };
 }

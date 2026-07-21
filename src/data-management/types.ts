@@ -143,7 +143,7 @@ export type TimelineMessageEntry = {
   outputActions?: TimelineOutputActions;
   rpDateTime?: string;
   workflowVariableSetCommands?: WorkflowVariableSetCommand[];
-  voiceClips?: MessageVoiceClip[];
+  voiceClips?: TimelineVoiceClip[];
   bankTransfer?: BankTransferRecord;
   socialPost?: SocialPostRecord;
   socialThreadAction?: SocialThreadActionRecord;
@@ -152,6 +152,10 @@ export type TimelineMessageEntry = {
   createdPhoneNote?: CreatedPhoneNoteCommit;
   deletedPhoneNote?: DeletedPhoneNoteCommit;
   simulatedAiChat?: SimulatedAiChatCommit;
+};
+
+export type TimelineVoiceClip = Omit<MessageVoiceClip, 'dataUrl'> & {
+  mediaRef: string;
 };
 
 export type TimelineEventEntry = {
@@ -231,10 +235,10 @@ export type SessionEntities = {
   characterStats?: CharacterStatsEntity;
   memory: Record<string, MemoryEntity>;
   /**
-   * Shared pool of embedded media (`data:` URLs) referenced from redacted
-   * `storybookJson` runtime and undo snapshots via `rpgraph-data-ref:<ref>`
-   * sentinels, so checkpoint copies do not repeat every image and voice
-   * sample. The embedded workflow keeps its full storybook copy.
+   * Shared pool of embedded media (`data:` URLs) referenced by timeline voice
+   * clips and from redacted `storybookJson` runtime/undo snapshots via
+   * `rpgraph-data-ref:<ref>` sentinels. The embedded workflow keeps its full
+   * storybook copy.
    */
   mediaData?: Record<string, string>;
 };

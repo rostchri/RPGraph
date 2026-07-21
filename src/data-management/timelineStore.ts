@@ -5,6 +5,7 @@ import type {
   TimelineMessageEntry,
   TimelineOutputActions,
   TimelineTurnMetadata,
+  TimelineVoiceClip,
 } from './types';
 import { stableEntryId } from './parsing';
 
@@ -94,6 +95,7 @@ function messageToTimelineEntry(
   message: MessageRecord,
   embeddedPhoneMessageIds: Map<number, string>,
   embeddedSocialMessageIds: Map<number, string>,
+  mediaRefForDataUrl: (dataUrl: string) => string,
 ): TimelineMessageEntry {
   const id = messageEntryId(turn, message);
   const channel = message.channel === 'phone' || message.phoneMessage ? 'phone' : 'rp';
@@ -151,7 +153,12 @@ function messageToTimelineEntry(
     outputActions: messageOutputActions(message),
     rpDateTime: message.rpDateTime,
     workflowVariableSetCommands: message.workflowVariableSetCommands,
-    voiceClips: message.voiceClips?.length ? message.voiceClips : undefined,
+    voiceClips: message.voiceClips?.length
+      ? message.voiceClips.map(({ dataUrl, ...clip }): TimelineVoiceClip => ({
+          ...clip,
+          mediaRef: mediaRefForDataUrl(dataUrl),
+        }))
+      : undefined,
     bankTransfer: message.bankTransfer,
     socialPost: message.socialPost,
     socialThreadAction: message.socialThreadAction,
@@ -163,7 +170,16 @@ function messageToTimelineEntry(
   };
 }
 
-export function timelineFromTurnRecords(turns: TurnRecord[]): TimelineEntry[] {
+export function turnTimelineEntryIds(turn: TurnRecord): string[] {
+  return [...turn.input.messages, ...turn.output.messages].map((message) =>
+    messageEntryId(turn, message)
+  );
+}
+
+function timelineFromTurnRecords(
+  turns: TurnRecord[],
+  mediaRefForDataUrl: (dataUrl: string) => string,
+): TimelineEntry[] {
   const embeddedPhoneMessageIds = new Map<number, string>();
   const embeddedSocialMessageIds = new Map<number, string>();
   turns.forEach((turn) => {
@@ -179,10 +195,24 @@ export function timelineFromTurnRecords(turns: TurnRecord[]): TimelineEntry[] {
   return turns.flatMap((turn) => {
     const entries = [
       ...turn.input.messages.map((message) =>
-        messageToTimelineEntry(turn, 'input', message, embeddedPhoneMessageIds, embeddedSocialMessageIds),
+        messageToTimelineEntry(
+          turn,
+          'input',
+          message,
+          embeddedPhoneMessageIds,
+          embeddedSocialMessageIds,
+          mediaRefForDataUrl,
+        ),
       ),
       ...turn.output.messages.map((message) =>
-        messageToTimelineEntry(turn, 'output', message, embeddedPhoneMessageIds, embeddedSocialMessageIds),
+        messageToTimelineEntry(
+          turn,
+          'output',
+          message,
+          embeddedPhoneMessageIds,
+          embeddedSocialMessageIds,
+          mediaRefForDataUrl,
+        ),
       ),
     ];
     // Turn-level metadata lives once on the turn's first entry.
@@ -197,6 +227,7 @@ export function timelineFromTurnRecordsWithOpeningMessages(
   turns: TurnRecord[],
   openingMessages: MessageRecord[],
   savedAt: string,
+  mediaRefForDataUrl: (dataUrl: string) => string,
 ): TimelineEntry[] {
   const openingTurnMessages = new Set(
     turns
@@ -223,7 +254,7 @@ export function timelineFromTurnRecordsWithOpeningMessages(
         },
       } satisfies TurnRecord;
     });
-  return timelineFromTurnRecords([...looseOpeningTurns, ...turns]);
+  return timelineFromTurnRecords([...looseOpeningTurns, ...turns], mediaRefForDataUrl);
 }
 
 export function timelineMessages(timeline: TimelineEntry[]) {
