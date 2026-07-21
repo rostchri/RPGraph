@@ -756,6 +756,35 @@ const previousGetImagesResultTemplates = new Set([
   ].join('\n'),
 ]);
 
+export function previousPromptActionDefaultsForValidation() {
+  return [
+    ...Array.from(previousCreateImageInstructions, (text, index) => ({
+      id: `create-image-instruction-${index + 1}`,
+      text,
+    })),
+    ...Array.from(previousUpdatePhoneImageCaptionInstructions, (text, index) => ({
+      id: `phone-caption-instruction-${index + 1}`,
+      text,
+    })),
+    ...Array.from(previousUpdatePhoneImageCaptionAfterReplyInstructions, (text, index) => ({
+      id: `phone-caption-after-reply-${index + 1}`,
+      text,
+    })),
+    ...Array.from(previousGetImagesLlmInstructions, (text, index) => ({
+      id: `get-images-instruction-${index + 1}`,
+      text,
+    })),
+    ...Array.from(previousCreateImageResultTemplates, (text, index) => ({
+      id: `create-image-result-${index + 1}`,
+      text,
+    })),
+    ...Array.from(previousGetImagesResultTemplates, (text, index) => ({
+      id: `get-images-result-${index + 1}`,
+      text,
+    })),
+  ];
+}
+
 function currentOrCustomTemplate(value: unknown, currentTemplate: string, previousTemplates: Set<string>) {
   if (typeof value !== 'string' || !value.trim()) {
     return currentTemplate;

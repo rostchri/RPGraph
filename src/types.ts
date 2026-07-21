@@ -217,8 +217,15 @@ export type LlmCallStats = {
   durationMs: number;
 };
 
+export type LlmCallStage =
+  | { kind: 'step'; name: string; replay?: number }
+  | { kind: 'action'; name: string; correction?: boolean }
+  | { kind: 'command'; name?: string; correction?: boolean }
+  | { kind: 'correction'; name: string };
+
 export type NodeLlmCallStats = LlmCallStats & {
   label: string;
+  stage?: LlmCallStage;
 };
 
 export type SettingsValueEntry = {
@@ -294,6 +301,7 @@ type WorkflowNodeCommonFields = {
   runActiveStartedAtMs?: number;
   runVisionActive?: boolean;
   llmActiveCallLabel?: string;
+  llmActiveCallStage?: LlmCallStage;
   llmActiveCallStartedAtMs?: number;
   runCompleted?: boolean;
   runPrepared?: boolean;

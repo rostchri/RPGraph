@@ -1,4 +1,4 @@
-import type { WorkflowNodeData } from '../types';
+import type { LlmCallStage, WorkflowNodeData } from '../types';
 import {
   llmPromptSwitchOutputTitles,
   llmPromptSwitchPromptTitles,
@@ -16,19 +16,6 @@ export function promptSwitchRouteLabel(data: WorkflowNodeData) {
   return data.nodeType === 'llm-prompt-switch' ? selectedPromptSwitchRoute(data) : undefined;
 }
 
-function withoutRoutePrefix(data: WorkflowNodeData, label: string) {
-  const route = promptSwitchRouteLabel(data);
-  if (!route) {
-    return label.trim();
-  }
-  const trimmed = label.trim();
-  return trimmed === route
-    ? ''
-    : trimmed.startsWith(`${route} / `)
-      ? trimmed.slice(route.length + 3).trim()
-      : trimmed;
-}
-
 export function readableRuntimeName(value: string) {
   const normalized = value.trim().replace(/_/g, ' ').replace(/\s+/g, ' ');
   if (!normalized) {
@@ -40,38 +27,21 @@ export function readableRuntimeName(value: string) {
     .replace(/^./, (character) => character.toLocaleUpperCase());
 }
 
-export function llmCallStageLabel(data: WorkflowNodeData, label: string) {
-  if (data.nodeType !== 'llm-prompt-switch') {
-    return readableRuntimeName(label);
+export function llmCallStageLabel(stage: LlmCallStage | undefined, fallbackLabel: string) {
+  if (!stage) {
+    return readableRuntimeName(fallbackLabel);
   }
-  const stage = withoutRoutePrefix(data, label);
-  if (!stage || /^Initial action prompt$/i.test(stage) || /^Action replay \d+$/i.test(stage)) {
-    return 'Step: Main';
+  const suffix = 'correction' in stage && stage.correction ? ' · Correction' : '';
+  switch (stage.kind) {
+    case 'step':
+      return `Step: ${readableRuntimeName(stage.name)}${stage.replay ? ` · Replay ${stage.replay}` : ''}`;
+    case 'action':
+      return `Action: ${readableRuntimeName(stage.name)}${suffix}`;
+    case 'command':
+      return `${stage.name ? `Command: ${readableRuntimeName(stage.name)}` : 'Command'}${suffix}`;
+    case 'correction':
+      return `Correction: ${readableRuntimeName(stage.name)}`;
   }
-  const detailStage = stage.replace(/^Action replay \d+\s*\/\s*/i, '');
-  const stepStage = detailStage.match(/^Step ([A-Za-z0-9_-]+)$/i);
-  if (stepStage) {
-    return `Step: ${readableRuntimeName(stepStage[1])}`;
-  }
-  const stepReplay = detailStage.match(/^Step ([A-Za-z0-9_-]+) replay (\d+)$/i);
-  if (stepReplay) {
-    return `Step: ${readableRuntimeName(stepReplay[1])} · Replay ${stepReplay[2]}`;
-  }
-  const action = detailStage.match(/^(?:Step [A-Za-z0-9_-]+ action follow-up|Action follow-up|After-reply action):\s*(.+)$/i);
-  if (action) {
-    return `Action: ${readableRuntimeName(action[1])}`;
-  }
-  const command = detailStage.match(/^Command(?: pass)?(?::\s*)?(.+)?$/i);
-  if (command) {
-    return command[1]
-      ? `Command: ${readableRuntimeName(command[1])}`
-      : 'Command';
-  }
-  const correction = detailStage.match(/^(.+?) correction(?: replay)?$/i);
-  if (correction) {
-    return `Correction: ${readableRuntimeName(correction[1])}`;
-  }
-  return readableRuntimeName(detailStage);
 }
 
 export function nodeFallbackStageLabel(data: WorkflowNodeData) {

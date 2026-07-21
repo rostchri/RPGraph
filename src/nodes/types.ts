@@ -7,6 +7,7 @@ import type {
   ChatImageAttachment,
   MessageRecord,
   TurnRecord,
+  LlmCallStage,
   NodeLlmCallStats,
   RpDateTimeFormat,
   RpWeekdayLanguage,
@@ -37,6 +38,7 @@ export type SharedNodeData<TType extends NodeTypeId = NodeTypeId> = {
   runActiveStartedAtMs?: number;
   runVisionActive?: boolean;
   llmActiveCallLabel?: string;
+  llmActiveCallStage?: LlmCallStage;
   llmActiveCallStartedAtMs?: number;
   runCompleted?: boolean;
   runPrepared?: boolean;

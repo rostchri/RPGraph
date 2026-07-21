@@ -283,6 +283,7 @@ export async function executeGraph({
             runActive: true,
             runVisionActive: metadata.hasImages,
             llmActiveCallLabel: metadata.label,
+            llmActiveCallStage: metadata.stage,
             llmActiveCallStartedAtMs: metadata.startedAtMs,
           });
         }
@@ -292,6 +293,7 @@ export async function executeGraph({
           updateRuntimeNode(nodeId, {
             runVisionActive: false,
             llmActiveCallLabel: undefined,
+            llmActiveCallStage: undefined,
             llmActiveCallStartedAtMs: undefined,
           });
         }
@@ -719,6 +721,7 @@ export async function executeGraph({
               runActive: false,
               runActiveStartedAtMs: undefined,
               llmActiveCallLabel: undefined,
+              llmActiveCallStage: undefined,
               llmActiveCallStartedAtMs: undefined,
               runCompleted: false,
               runPrepared: false,
@@ -747,6 +750,7 @@ export async function executeGraph({
             runActive: false,
             runActiveStartedAtMs: undefined,
             llmActiveCallLabel: undefined,
+            llmActiveCallStage: undefined,
             llmActiveCallStartedAtMs: undefined,
           });
         }

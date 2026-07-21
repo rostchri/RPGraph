@@ -41,7 +41,7 @@ export function RunProgressCard({
   const route = runtimeData ? promptSwitchRouteLabel(runtimeData) : undefined;
   const stage = runtimeData
     ? runtimeData.llmActiveCallLabel
-      ? llmCallStageLabel(runtimeData, runtimeData.llmActiveCallLabel)
+      ? llmCallStageLabel(runtimeData.llmActiveCallStage, runtimeData.llmActiveCallLabel)
       : nodeFallbackStageLabel(runtimeData)
     : 'Preparing workflow';
   const activity = `${route ?? runtimeData?.label ?? 'RPGraph'}: ${stage}`;

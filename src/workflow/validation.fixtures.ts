@@ -2,6 +2,7 @@ import { captureTurnRuntime } from '../chat/turns';
 import { currentSessionFormatVersion } from '../session/version';
 import type {
   ChatImageAttachment,
+  LlmCallStage,
   MessageRecord,
   TurnRecord,
   WorkflowFile,
@@ -188,6 +189,7 @@ import {
   promptActionConfigs,
   promptActionInstructionText,
   promptActionRuntimeSettings,
+  previousPromptActionDefaultsForValidation,
   replacePromptActionTitle,
   unwrapJsonCodeFence,
 } from '../nodes/shared/promptActions';
@@ -258,7 +260,56 @@ function assertThrowsFixture(action: () => void, message: string) {
   throw new Error(`Workflow validation fixture failed: ${message}`);
 }
 
+function fixtureTextSignature(text: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+const previousPromptActionDefaultSignatures = [
+  'create-image-instruction-1:4493:bcb6b611',
+  'create-image-instruction-2:3697:2586555d',
+  'create-image-instruction-3:4199:797b306a',
+  'create-image-instruction-4:1148:edbb0e3c',
+  'create-image-instruction-5:1092:5935443b',
+  'phone-caption-instruction-1:1997:287ce91d',
+  'phone-caption-after-reply-1:3084:acc80b46',
+  'phone-caption-after-reply-2:2785:2c9d80f6',
+  'phone-caption-after-reply-3:2644:7e36e882',
+  'phone-caption-after-reply-4:3149:5be93360',
+  'phone-caption-after-reply-5:3307:8ff74b0c',
+  'phone-caption-after-reply-6:2254:0e4322a8',
+  'phone-caption-after-reply-7:1955:961d0978',
+  'phone-caption-after-reply-8:2113:f42c352c',
+  'phone-caption-after-reply-9:1814:897ca0bc',
+  'get-images-instruction-1:748:d66ce009',
+  'get-images-instruction-2:735:49788531',
+  'get-images-instruction-3:389:ed7ed76f',
+  'get-images-instruction-4:605:9ce7d20e',
+  'create-image-result-1:243:e4845c8c',
+  'create-image-result-2:240:be37f41b',
+  'create-image-result-3:209:a11ab164',
+  'create-image-result-4:550:495144c5',
+  'create-image-result-5:273:f16ba521',
+  'create-image-result-6:279:99850548',
+  'get-images-result-1:739:93e5a2a0',
+  'get-images-result-2:339:6ee17746',
+  'get-images-result-3:130:1f636f21',
+  'get-images-result-4:921:28b64f33',
+  'get-images-result-5:558:8938fbf8',
+  'get-images-result-6:54:c3c52fe9',
+];
+
 export function verifyWorkflowValidationFixtures() {
+  assertFixture(
+    previousPromptActionDefaultsForValidation()
+      .map(({ id, text }) => `${id}:${fixtureTextSignature(text)}`)
+      .join('\n') === previousPromptActionDefaultSignatures.join('\n'),
+    'every shipped previous prompt-action default must retain its exact migration text',
+  );
   const normalizedPhoneNotes = normalizePhoneNotesByCharacter({
     alex: [
       { id: 'note-1', title: 'First', text: '', dayLabel: '', color: 'mint' },
@@ -5548,6 +5599,7 @@ async function verifyPromptRunFixtures() {
   const planStepRequests: Array<{
     prompt: string;
     images?: Array<{ id: string }>;
+    stage?: LlmCallStage;
   }> = [];
   const planStepWarnings: string[] = [];
   const planStepOutputs = [
@@ -5577,7 +5629,11 @@ async function verifyPromptRunFixtures() {
     providerHealthById: {},
     llm: {
       supportsVision: async () => true,
-      complete: async (request: { prompt: string; images?: Array<{ id: string }> }) => {
+      complete: async (request: {
+        prompt: string;
+        images?: Array<{ id: string }>;
+        stage?: LlmCallStage;
+      }) => {
         planStepRequests.push(request);
         return { text: planStepOutputs.shift() ?? '', connection: { label: 'Fixture LLM' } };
       },
@@ -5616,10 +5672,14 @@ async function verifyPromptRunFixtures() {
   const planStepPrompts = planStepRequests.map((request) => request.prompt);
   assertFixture(
     planStepPrompts.length === 2 &&
+      planStepRequests[0]?.stage?.kind === 'step' &&
+      planStepRequests[0].stage.name === 'planning' &&
+      planStepRequests[1]?.stage?.kind === 'step' &&
+      planStepRequests[1].stage.name === 'main' &&
       planStepPrompts[0]?.includes('Plan the possible outcomes of the scene.') === true &&
       planStepPrompts[0]?.includes('End every bullet with its probability as (chance: NN%).') === true &&
       !planStepPrompts[0]?.includes('Write the scene as RP story text.'),
-    'a @step:planning section must run a separate planning pass without the main prompt',
+    'a @step:planning section must run as a structured separate pass without the main prompt',
   );
   assertFixture(
     planStepRequests.every((request) =>
@@ -5736,26 +5796,14 @@ async function verifyPromptRunFixtures() {
   assertFixture(
     promptSwitchRouteLabel(promptSwitchCallDisplayData) ===
       'Messenger Apps / WhatsUp Prompt No Image' &&
-      llmCallStageLabel(
-        promptSwitchCallDisplayData,
-        'Messenger Apps / WhatsUp Prompt No Image / Step planning',
-      ) === 'Step: Planning' &&
-      llmCallStageLabel(
-        promptSwitchCallDisplayData,
-        'Messenger Apps / WhatsUp Prompt No Image / Action replay 1 / Step main',
-      ) === 'Step: Main' &&
-      llmCallStageLabel(
-        promptSwitchCallDisplayData,
-        'Messenger Apps / WhatsUp Prompt No Image / Step translation replay 2',
-      ) === 'Step: Translation · Replay 2' &&
-      llmCallStageLabel(
-        promptSwitchCallDisplayData,
-        'Messenger Apps / WhatsUp Prompt No Image',
-      ) === 'Step: Main' &&
-      llmCallStageLabel(
-        promptSwitchCallDisplayData,
-        'Messenger Apps / WhatsUp Prompt No Image / Command: Bank transfer',
-      ) === 'Command: Bank transfer',
+      llmCallStageLabel({ kind: 'step', name: 'planning' }, '') === 'Step: Planning' &&
+      llmCallStageLabel({ kind: 'step', name: 'main' }, '') === 'Step: Main' &&
+      llmCallStageLabel({ kind: 'step', name: 'translation', replay: 2 }, '') ===
+        'Step: Translation · Replay 2' &&
+      llmCallStageLabel({ kind: 'action', name: 'Create character phone image' }, '') ===
+        'Action: Create character phone image' &&
+      llmCallStageLabel({ kind: 'command', name: 'Bank transfer' }, '') ===
+        'Command: Bank transfer',
     'prompt switch call display labels must keep one route heading and concise stage names',
   );
 

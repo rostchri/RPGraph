@@ -117,7 +117,10 @@ export function LlmCallMetrics({ data }: { data: WorkflowNode['data'] }) {
       {routeLabel && <strong className="llm-call-route">{routeLabel}</strong>}
       {labels.map((label) => {
         const actual = displayStats.find((stats) => stats.label === label);
-        const displayLabel = llmCallStageLabel(data, label);
+        const displayLabel = llmCallStageLabel(
+          actual?.stage ?? (label === activeLabel ? data.llmActiveCallStage : undefined),
+          label,
+        );
         return (
           <div
             className={`llm-call-metric${hasReasoning ? ' llm-call-metric-with-reasoning' : ''}`}

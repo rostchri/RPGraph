@@ -586,6 +586,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(0)} / ${passLabel}`,
+        stage: { kind: 'step', name: step.name, replay: stepReplayCount || undefined },
         prompt: [stepBefore, stepTextInput, stepAfter].filter(Boolean).join('\n\n'),
         images: stepImagePass.images,
         contributesToTokenCalibration,
@@ -649,6 +650,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(0)} / Step ${step.name} action follow-up: ${actionConfig.title}`,
+        stage: { kind: 'action', name: actionConfig.title },
         prompt: [stepBefore, stepTextInput, followUpInstruction].filter(Boolean).join('\n\n'),
         images: stepImagePass.images,
         contributesToTokenCalibration,
@@ -755,6 +757,11 @@ export async function runActionAwarePrompt({
       label: outputStep.name
         ? `${callLabel(actionReplayCount)} / Step ${outputStep.name}`
         : callLabel(actionReplayCount),
+      stage: {
+        kind: 'step',
+        name: outputStep.name || 'main',
+        replay: actionReplayCount || undefined,
+      },
       prompt: promptForPass,
       images: imagePass.images,
       onChunk: streamsVisibleOutput
@@ -803,6 +810,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(actionReplayCount)} / Social account correction`,
+        stage: { kind: 'correction', name: 'Social account' },
         prompt: correctedPrompt,
         images: imagePass.images,
         onChunk: streamsVisibleOutput
@@ -938,6 +946,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(actionReplayCount)} / Action follow-up: ${actionConfig.title}`,
+        stage: { kind: 'action', name: actionConfig.title },
         prompt: [promptBeforeForFollowUp, followUpTextInput, followUpInstruction]
           .filter(Boolean)
           .join('\n\n'),
@@ -1075,6 +1084,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(0)} / Command: ${commandNames}`,
+        stage: { kind: 'command', name: commandNames },
         prompt: [commandTextInput, instruction].filter(Boolean).join('\n\n'),
         images: commandImagePass.images,
         onChunk: streamCommandOutput,
@@ -1121,6 +1131,7 @@ export async function runActionAwarePrompt({
           connectionId: node.data.connectionId,
           nodeId: node.id,
           label: `${callLabel(0)} / Command: ${commandNames} / Correction`,
+          stage: { kind: 'command', name: commandNames, correction: true },
           prompt: [commandTextInput, correction, instruction].filter(Boolean).join('\n\n'),
           images: commandImagePass.images,
           onChunk: streamCommandOutput,
@@ -1236,6 +1247,7 @@ export async function runActionAwarePrompt({
       connectionId: node.data.connectionId,
       nodeId: node.id,
       label: `${callLabel(0)} / After-reply action: ${actionConfig.title}`,
+      stage: { kind: 'action', name: actionConfig.title },
       prompt: [promptBeforeForPass, textInputForPass, instruction].filter(Boolean).join('\n\n'),
       images: afterReplyImagePass.images,
       contributesToTokenCalibration,
@@ -1311,6 +1323,7 @@ export async function runActionAwarePrompt({
         connectionId: node.data.connectionId,
         nodeId: node.id,
         label: `${callLabel(0)} / After-reply action correction: ${actionConfig.title}`,
+        stage: { kind: 'action', name: actionConfig.title, correction: true },
         prompt: [
           promptBeforeForPass,
           textInputForPass,
